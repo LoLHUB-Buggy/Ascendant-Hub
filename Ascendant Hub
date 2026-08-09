@@ -1,0 +1,1158 @@
+-- ============================================================
+--  RIVALS CHEAT — FULL MERGED SCRIPT v4.0
+--  Context  : Roblox executor (Synapse X / KRNL / Fluxus / Wave)
+--  Game     : Rivals (Roblox) FPS
+--  Lines    : ~2100
+--
+--  MODULES:
+--  [1] SERVICES & CORE
+--  [2] THEME
+--  [3] STATE (all cheat values)
+--  [4] UTILITY FUNCTIONS
+--  [5] DRAWING LAYER (ESP drawings)
+--  [6] GUI COMPONENT LIBRARY
+--  [7] CHEAT LOGIC — ESP
+--  [8] CHEAT LOGIC — THROWABLE ESP
+--  [9] CHEAT LOGIC — AIMBOT
+--  [10] CHEAT LOGIC — TRIGGERBOT
+--  [11] CHEAT LOGIC — PROJECTILE REDIRECT
+--  [12] CHEAT LOGIC — MODS (speed/recoil/reload/ads)
+--  [13] GUI — WINDOW + TITLEBAR + TABS
+--  [14] GUI — TAB CONTENT (main/esp/visuals/misc/settings)
+--  [15] MAIN LOOP
+--  [16] INIT
+-- ============================================================
+
+-- ============================================================
+--  [1] SERVICES & CORE
+-- ============================================================
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local UserInputService   = game:GetService("UserInputService")
+local TweenService       = game:GetService("TweenService")
+local Camera             = workspace.CurrentCamera
+local LocalPlayer        = Players.LocalPlayer
+local Mouse              = LocalPlayer:GetMouse()
+
+-- ============================================================
+--  [2] THEME
+-- ============================================================
+local T = {
+    BG          = Color3.fromRGB(13,  13,  16),
+    BG2         = Color3.fromRGB(18,  18,  22),
+    BG3         = Color3.fromRGB(24,  24,  30),
+    BORDER      = Color3.fromRGB(45,  45,  58),
+    ACCENT      = Color3.fromRGB(139, 47,  201),
+    ACCENT2     = Color3.fromRGB(168, 85,  247),
+    HIGHLIGHT   = Color3.fromRGB(192, 38,  211),
+    TEXT        = Color3.fromRGB(220, 220, 228),
+    TEXT_DIM    = Color3.fromRGB(120, 120, 135),
+    TEXT_ACCENT = Color3.fromRGB(192, 38,  211),
+    RED         = Color3.fromRGB(220, 50,  50),
+    GREEN       = Color3.fromRGB(50,  220, 100),
+    SLIDER_BG   = Color3.fromRGB(30,  30,  40),
+    SLIDER_FILL = Color3.fromRGB(139, 47,  201),
+    TAB_ACTIVE  = Color3.fromRGB(139, 47,  201),
+    TAB_IDLE    = Color3.fromRGB(30,  30,  38),
+    TOGGLE_ON   = Color3.fromRGB(139, 47,  201),
+    TOGGLE_OFF  = Color3.fromRGB(40,  40,  52),
+    FONT        = Enum.Font.Code,
+    FONT_SZ     = 11,
+    FONT_SZ_SM  = 10,
+}
+
+-- ============================================================
+--  [3] STATE
+-- ============================================================
+local S = {
+    -- AIMBOT / SILENT AIM
+    aim_enabled        = false,
+    aim_manipulation   = false,
+    aim_closest_part   = true,
+    aim_visualize      = false,
+    aim_show_fov       = true,
+    aim_fov_radius     = 120,
+    aim_hit_chance     = 100,
+    aim_smooth         = 20,       -- 0=instant 100=slowest
+    aim_target_part    = "Head",
+    aim_visible_only   = true,
+    aim_ignore_prot    = false,
+    aim_block_shield   = true,
+    aim_block_katana   = true,
+    aim_disable_flash  = false,
+    aim_limit_dist     = false,
+    aim_react_ms       = 0,
+    aim_forget_s       = 0,
+    aim_blacklist_part = "Head",
+    aim_wallbang       = false,
+    aim_ignore_fov     = false,
+    aim_key            = Enum.UserInputType.MouseButton2,
+
+    -- TRIGGERBOT
+    trig_enabled       = false,
+    trig_no_spread     = false,
+    trig_full_auto     = false,
+    trig_backstab      = false,
+    trig_firerate      = 10,
+    trig_fov           = 15,
+    trig_key           = Enum.KeyCode.C,
+
+    -- RAGEBOT
+    rage_enabled       = false,
+    rage_void_spam     = false,
+    rage_hide_ms       = 0.15,
+    rage_attack_ms     = 0.10,
+    rage_shoot_att     = 2,
+    rage_attack_mode   = "Primary",
+
+    -- ESP
+    esp_enabled        = true,
+    esp_highlight      = true,
+    esp_names          = true,
+    esp_health         = true,
+    esp_arrows         = true,
+    esp_distance       = true,
+    esp_vert_hp        = true,
+    esp_look_dir       = false,
+    esp_weapon         = true,
+    esp_teammates      = false,
+    esp_throwables     = true,
+    esp_fill_opacity   = 10,
+    esp_outline_opacity= 85,
+    esp_max_dist       = 1000,
+    esp_arrow_radius   = 120,
+    esp_col_visible    = Color3.fromRGB(255, 60,  60),
+    esp_col_hidden     = Color3.fromRGB(60,  120, 255),
+    esp_col_wallbang   = Color3.fromRGB(255, 165, 0),
+    esp_col_lookdir    = Color3.fromRGB(0,   255, 180),
+
+    -- MODS
+    mod_attack_speed   = false,
+    mod_attack_pct     = 100,
+    mod_fast_reload    = false,
+    mod_reload_pct     = 100,
+    mod_no_recoil      = false,
+    mod_fast_ads       = false,
+    mod_ads_pct        = 100,
+
+    -- VISUALS
+    vis_fov_circle     = true,
+    vis_crosshair      = false,
+    vis_hit_marker     = true,
+    vis_tracer         = false,
+
+    -- MISC
+    misc_speed         = false,
+    misc_speed_val     = 16,
+    misc_inf_ammo      = false,
+    misc_fly           = false,
+
+    -- PROJECTILE
+    proj_redirect      = false,
+
+    -- GUI
+    gui_visible        = true,
+}
+
+-- ============================================================
+--  [4] UTILITY
+-- ============================================================
+local THROWABLE_NAMES = {"Grenade","FlashGrenade","SmokeGrenade","Molotov","Throwable","Bomb"}
+local KATANA_NAMES    = {"Katana","Sword","Blade"}
+local SHIELD_NAMES    = {"RiotShield","Shield"}
+local BONES_PRIORITY  = {"Head","UpperTorso","LowerTorso","HumanoidRootPart","RightUpperArm","LeftUpperArm"}
+
+local function W2S(pos)
+    local s, on = Camera:WorldToViewportPoint(pos)
+    if on then return Vector2.new(s.X, s.Y), true end
+    return nil, false
+end
+
+local function Dist3(a, b) return (a - b).Magnitude end
+
+local function GetCharParts(player)
+    local c = player.Character
+    if not c then return nil, nil, nil end
+    return c:FindFirstChild("HumanoidRootPart"),
+           c:FindFirstChildOfClass("Humanoid"),
+           c:FindFirstChild("Head")
+end
+
+local function Raycast(origin, dir, extra)
+    local params = RaycastParams.new()
+    local ignore = {workspace.Terrain}
+    if LocalPlayer.Character then table.insert(ignore, LocalPlayer.Character) end
+    if extra then for _, v in ipairs(extra) do table.insert(ignore, v) end end
+    params.FilterDescendantsInstances = ignore
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    return workspace:Raycast(origin, dir, params)
+end
+
+local function IsVisible(from, to, extra)
+    return Raycast(from, to - from, extra) == nil
+end
+
+local function IsWallbangable(from, to)
+    local hit = Raycast(from, to - from, nil)
+    if not hit then return true end
+    local offset = (to - from).Unit * (hit.Distance + 0.6)
+    return Raycast(from + offset, to - (from + offset), nil) == nil
+end
+
+local function GetVisState(localRoot, targetPos, charIgnore)
+    if IsVisible(localRoot.Position, targetPos, {charIgnore}) then
+        return "Visible"
+    elseif IsWallbangable(localRoot.Position, targetPos) then
+        return "Wallbang"
+    end
+    return "Hidden"
+end
+
+local function GetStateColor(state)
+    if state == "Visible"  then return S.esp_col_visible  end
+    if state == "Wallbang" then return S.esp_col_wallbang end
+    return S.esp_col_hidden
+end
+
+local function GetBB(char)
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local top, onT = W2S(root.Position + Vector3.new(0,  3.2, 0))
+    local bot, onB = W2S(root.Position - Vector3.new(0,  2.3, 0))
+    if not onT or not onB then return nil end
+    local h = math.abs(top.Y - bot.Y)
+    local w = h * 0.45
+    return { x=top.X-w/2, y=top.Y, w=w, h=h, mx=top.X, ty=top.Y, by=bot.Y }
+end
+
+local function GetWeaponName(char)
+    local t = char:FindFirstChildOfClass("Tool")
+    return t and t.Name or "None"
+end
+
+local function HoldsKatana(char)
+    local w = GetWeaponName(char):lower()
+    for _, n in ipairs(KATANA_NAMES) do if w:find(n:lower()) then return true end end
+    return false
+end
+
+local function HoldsShield(char)
+    local w = GetWeaponName(char):lower()
+    for _, n in ipairs(SHIELD_NAMES) do if w:find(n:lower()) then return true end end
+    return false
+end
+
+local function GetArrowPos(screenPos)
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local dir    = (screenPos - center)
+    if dir.Magnitude == 0 then return nil, nil end
+    local norm  = dir.Unit
+    local angle = math.atan2(norm.Y, norm.X)
+    return center + norm * S.esp_arrow_radius, angle
+end
+
+-- ============================================================
+--  [5] DRAWING LAYER
+-- ============================================================
+local DrawPool  = {}
+local ThrowPool = {}
+
+local function ND(t, p)
+    local d = Drawing.new(t)
+    for k, v in pairs(p) do d[k] = v end
+    return d
+end
+
+local function GD(player)
+    if DrawPool[player] then return DrawPool[player] end
+    DrawPool[player] = {
+        box      = ND("Square",   {Visible=false, Filled=false, Thickness=1}),
+        boxFill  = ND("Square",   {Visible=false, Filled=true}),
+        name     = ND("Text",     {Visible=false, Size=13, Center=true, Outline=true, OutlineColor=Color3.new()}),
+        hpText   = ND("Text",     {Visible=false, Size=11, Center=true, Outline=true, OutlineColor=Color3.new()}),
+        dist     = ND("Text",     {Visible=false, Size=11, Center=true, Outline=true, OutlineColor=Color3.new(), Color=Color3.fromRGB(200,200,200)}),
+        weapon   = ND("Text",     {Visible=false, Size=11, Center=true, Outline=true, OutlineColor=Color3.new(), Color=Color3.fromRGB(255,220,100)}),
+        hpBack   = ND("Square",   {Visible=false, Filled=true, Color=Color3.fromRGB(20,20,20)}),
+        hpFill   = ND("Square",   {Visible=false, Filled=true}),
+        lookDir  = ND("Line",     {Visible=false, Thickness=1, Color=Color3.fromRGB(0,255,180)}),
+        arrow    = ND("Triangle", {Visible=false, Filled=true}),
+        arrowOut = ND("Triangle", {Visible=false, Filled=false, Thickness=1}),
+    }
+    return DrawPool[player]
+end
+
+local function HideD(d)
+    for _, o in pairs(d) do if o and o.Visible ~= nil then o.Visible = false end end
+end
+
+local function CleanupD(player)
+    local d = DrawPool[player]
+    if not d then return end
+    for _, o in pairs(d) do if o and o.Remove then o:Remove() end end
+    DrawPool[player] = nil
+end
+
+local function GetThrowDraw(obj)
+    if ThrowPool[obj] then return ThrowPool[obj] end
+    ThrowPool[obj] = {
+        dot  = ND("Circle", {Visible=false, Filled=true,  Radius=4, Color=Color3.fromRGB(255,100,0)}),
+        name = ND("Text",   {Visible=false, Size=11, Center=true, Outline=true, Color=Color3.fromRGB(255,180,0), OutlineColor=Color3.new()}),
+    }
+    return ThrowPool[obj]
+end
+
+local FovCircle = ND("Circle", {
+    Visible=false, Filled=false, Thickness=1,
+    Radius=120, Color=Color3.fromRGB(255,255,255),
+    Position=Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2),
+})
+
+-- ============================================================
+--  [6] GUI COMPONENT LIBRARY
+-- ============================================================
+local function New(cls, props, children)
+    local obj = Instance.new(cls)
+    for k, v in pairs(props) do pcall(function() obj[k] = v end) end
+    if children then for _, c in ipairs(children) do if c then c.Parent = obj end end end
+    return obj
+end
+
+local function Pad(parent, size)
+    return New("UIPadding", {
+        PaddingLeft=UDim.new(0,size), PaddingRight=UDim.new(0,size),
+        PaddingTop=UDim.new(0,size),  PaddingBottom=UDim.new(0,size),
+        Parent=parent,
+    })
+end
+
+local function ListLayout(parent, spacing, dir)
+    return New("UIListLayout", {
+        SortOrder     = Enum.SortOrder.LayoutOrder,
+        FillDirection = dir or Enum.FillDirection.Vertical,
+        Padding       = UDim.new(0, spacing or 2),
+        Parent        = parent,
+    })
+end
+
+local function Corner(parent, r)
+    New("UICorner", {CornerRadius=UDim.new(0, r or 2), Parent=parent})
+end
+
+local function Stroke(parent, color, thick)
+    New("UIStroke", {Color=color or T.BORDER, Thickness=thick or 1, Parent=parent})
+end
+
+local function Label(parent, text, sz, col, xalign)
+    return New("TextLabel", {
+        Text=text, Font=T.FONT, TextSize=sz or T.FONT_SZ,
+        TextColor3=col or T.TEXT, BackgroundTransparency=1,
+        TextXAlignment=xalign or Enum.TextXAlignment.Left,
+        AutomaticSize=Enum.AutomaticSize.XY, Parent=parent,
+    })
+end
+
+local function ScrollFrame(parent, height)
+    return New("ScrollingFrame", {
+        Size=UDim2.new(1,0,0,height), BackgroundTransparency=1,
+        ScrollBarThickness=2, ScrollBarImageColor3=T.ACCENT,
+        CanvasSize=UDim2.new(0,0,0,0),
+        AutomaticCanvasSize=Enum.AutomaticSize.Y, Parent=parent,
+    })
+end
+
+-- TOGGLE
+local function MakeToggle(parent, labelText, stateKey, callback)
+    local row = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=parent})
+    ListLayout(row, 0, Enum.FillDirection.Horizontal)
+    local box = New("Frame", {Size=UDim2.new(0,10,0,10), BackgroundColor3=S[stateKey] and T.TOGGLE_ON or T.TOGGLE_OFF, Parent=row})
+    Corner(box, 2); Stroke(box, T.BORDER)
+    local dot = New("Frame", {Size=UDim2.new(0,5,0,5), Position=UDim2.new(0.5,-2,0.5,-2), BackgroundColor3=Color3.new(1,1,1), Visible=S[stateKey], Parent=box})
+    Corner(dot, 1)
+    local lbl = New("TextLabel", {Text=" "..labelText, Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=S[stateKey] and T.TEXT or T.TEXT_DIM, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Left, AutomaticSize=Enum.AutomaticSize.XY, Parent=row})
+    local function Update()
+        local on = S[stateKey]
+        box.BackgroundColor3 = on and T.TOGGLE_ON or T.TOGGLE_OFF
+        dot.Visible = on
+        lbl.TextColor3 = on and T.TEXT or T.TEXT_DIM
+    end
+    row.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            S[stateKey] = not S[stateKey]; Update()
+            if callback then callback(S[stateKey]) end
+        end
+    end)
+    return row
+end
+
+-- SLIDER
+local function MakeSlider(parent, labelText, stateKey, minV, maxV, suffix, callback)
+    local wrap = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=parent})
+    ListLayout(wrap, 1)
+    local topRow = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,11), Parent=wrap})
+    Label(topRow, labelText, T.FONT_SZ_SM, T.TEXT_DIM)
+    local valLbl = New("TextLabel", {Text=tostring(S[stateKey])..(suffix or ""), Font=T.FONT, TextSize=T.FONT_SZ_SM, TextColor3=T.ACCENT2, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Right, Size=UDim2.new(1,0,1,0), Parent=topRow})
+    local track = New("Frame", {Size=UDim2.new(1,0,0,5), BackgroundColor3=T.SLIDER_BG, Parent=wrap})
+    Corner(track, 2)
+    local ratio0 = (S[stateKey] - minV) / math.max(maxV - minV, 1)
+    local fill = New("Frame", {Size=UDim2.new(ratio0,0,1,0), BackgroundColor3=T.SLIDER_FILL, Parent=track})
+    Corner(fill, 2)
+    New("UIGradient", {Color=ColorSequence.new({ColorSequenceKeypoint.new(0,T.ACCENT), ColorSequenceKeypoint.new(1,T.ACCENT2)}), Parent=fill})
+    local dragging = false
+    local function SetValue(v)
+        v = math.clamp(math.round(v), minV, maxV)
+        S[stateKey] = v
+        fill.Size = UDim2.new((v-minV)/math.max(maxV-minV,1),0,1,0)
+        valLbl.Text = tostring(v)..(suffix or "")
+        if callback then callback(v) end
+    end
+    track.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
+    UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+    RunService.RenderStepped:Connect(function()
+        if dragging then
+            local rel = math.clamp((Mouse.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X,1), 0, 1)
+            SetValue(minV + rel*(maxV-minV))
+        end
+    end)
+    return wrap
+end
+
+-- DROPDOWN
+local function MakeDropdown(parent, labelText, stateKey, options, callback)
+    local wrap = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=parent})
+    ListLayout(wrap, 1)
+    Label(wrap, labelText, T.FONT_SZ_SM, T.TEXT_DIM)
+    local btn = New("TextButton", {Text=tostring(S[stateKey]), Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=T.TEXT, BackgroundColor3=T.BG3, Size=UDim2.new(1,0,0,16), TextXAlignment=Enum.TextXAlignment.Left, Parent=wrap})
+    Corner(btn,2); Stroke(btn, T.BORDER); Pad(btn,4)
+    New("TextLabel", {Text="▾", Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=T.ACCENT2, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Right, Size=UDim2.new(1,-4,1,0), Parent=btn})
+    local menuFrame = nil
+    btn.MouseButton1Click:Connect(function()
+        if menuFrame then menuFrame:Destroy(); menuFrame=nil; return end
+        menuFrame = New("Frame", {BackgroundColor3=T.BG2, Size=UDim2.new(1,0,0,#options*16), Position=UDim2.new(0,0,1,1), ZIndex=20, Parent=btn})
+        Corner(menuFrame,2); Stroke(menuFrame, T.ACCENT); ListLayout(menuFrame,0)
+        for _, opt in ipairs(options) do
+            local ob = New("TextButton", {Text=opt, Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=opt==S[stateKey] and T.ACCENT2 or T.TEXT, BackgroundColor3=T.BG2, Size=UDim2.new(1,0,0,16), TextXAlignment=Enum.TextXAlignment.Left, ZIndex=21, Parent=menuFrame})
+            Pad(ob,4)
+            ob.MouseButton1Click:Connect(function()
+                S[stateKey]=opt; btn.Text=opt
+                if callback then callback(opt) end
+                menuFrame:Destroy(); menuFrame=nil
+            end)
+        end
+    end)
+    return wrap
+end
+
+-- SECTION HEADER
+local function MakeSection(parent, title, secondary)
+    local row = New("Frame", {BackgroundColor3=T.BG3, Size=UDim2.new(1,0,0,16), Parent=parent})
+    Corner(row, 2)
+    New("Frame", {Size=UDim2.new(0,2,1,0), BackgroundColor3=T.ACCENT, Parent=row})
+    New("TextLabel", {Text="  "..title, Font=Enum.Font.GothamBold, TextSize=T.FONT_SZ, TextColor3=T.TEXT, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Left, Size=UDim2.new(0.6,0,1,0), Parent=row})
+    if secondary then
+        New("TextLabel", {Text=secondary, Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=T.ACCENT2, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Right, Size=UDim2.new(1,-6,1,0), Parent=row})
+    end
+    return row
+end
+
+-- EXPAND ROW
+local function MakeExpandRow(parent, labelText)
+    local btn = New("TextButton", {Text=labelText.."  ▸", Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=T.TEXT_DIM, BackgroundColor3=T.BG3, Size=UDim2.new(1,0,0,14), TextXAlignment=Enum.TextXAlignment.Left, Parent=parent})
+    Corner(btn,2); Pad(btn,4)
+    return btn
+end
+
+-- KV ROW
+local function MakeKV(parent, key, val)
+    local row = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Parent=parent})
+    New("TextLabel", {Text=key, Font=T.FONT, TextSize=T.FONT_SZ_SM, TextColor3=T.TEXT_DIM, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Left, Size=UDim2.new(0.6,0,1,0), Parent=row})
+    New("TextLabel", {Text=val, Font=T.FONT, TextSize=T.FONT_SZ_SM, TextColor3=T.ACCENT2, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Right, Size=UDim2.new(1,0,1,0), Parent=row})
+    return row
+end
+
+-- DOT BUTTON
+local function MakeDotBtn(parent, onClick)
+    local btn = New("TextButton", {Text="...", Font=T.FONT, TextSize=T.FONT_SZ_SM, TextColor3=T.TEXT_DIM, BackgroundColor3=T.BG3, Size=UDim2.new(0,22,0,12), Parent=parent})
+    Corner(btn,2); Stroke(btn, T.BORDER)
+    if onClick then btn.MouseButton1Click:Connect(onClick) end
+    return btn
+end
+
+-- ============================================================
+--  [7] CHEAT LOGIC — ESP RENDER
+-- ============================================================
+local HLPool = {}
+
+local function SetHighlight(player, char, color, fillAlpha, outAlpha)
+    if not S.esp_highlight then
+        if HLPool[player] then HLPool[player]:Destroy(); HLPool[player]=nil end
+        return
+    end
+    if not HLPool[player] then
+        local sb = Instance.new("SelectionBox")
+        sb.LineThickness=0.04; sb.Adornee=char; sb.Parent=Camera
+        HLPool[player] = sb
+    end
+    local sb = HLPool[player]
+    sb.SurfaceColor3=color; sb.Color3=color
+    sb.SurfaceTransparency=1-fillAlpha; sb.Transparency=1-outAlpha
+    sb.Adornee=char
+end
+
+local function RemoveHighlight(player)
+    if HLPool[player] then HLPool[player]:Destroy(); HLPool[player]=nil end
+end
+
+local function RenderESP()
+    local localChar = LocalPlayer.Character
+    local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    local center    = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not S.esp_show_teammates and player.Team == LocalPlayer.Team then
+            local d = DrawPool[player]; if d then HideD(d) end
+            RemoveHighlight(player); continue
+        end
+
+        local d = GD(player)
+        local root, hum, head = GetCharParts(player)
+
+        if not root or not hum or hum.Health <= 0 or not S.esp_enabled then
+            HideD(d); RemoveHighlight(player); continue
+        end
+
+        local dist = localRoot and Dist3(localRoot.Position, root.Position) or 0
+        if dist > S.esp_max_dist then HideD(d); RemoveHighlight(player); continue end
+
+        local state = localRoot and GetVisState(localRoot, root.Position, player.Character) or "Hidden"
+        local col   = GetStateColor(state)
+        local bb    = GetBB(player.Character)
+        local onScreen = bb ~= nil
+
+        -- Box
+        if onScreen then
+            d.box.Visible=true; d.box.Position=Vector2.new(bb.x,bb.y)
+            d.box.Size=Vector2.new(bb.w,bb.h); d.box.Color=col
+            d.box.Transparency=1-(S.esp_outline_opacity/100)
+            d.boxFill.Visible=true; d.boxFill.Position=Vector2.new(bb.x,bb.y)
+            d.boxFill.Size=Vector2.new(bb.w,bb.h); d.boxFill.Color=col
+            d.boxFill.Transparency=1-(S.esp_fill_opacity/100)
+        else d.box.Visible=false; d.boxFill.Visible=false end
+
+        -- Highlight
+        if onScreen then SetHighlight(player, player.Character, col, S.esp_fill_opacity/100, S.esp_outline_opacity/100)
+        else RemoveHighlight(player) end
+
+        -- Name
+        if S.esp_names and onScreen then
+            d.name.Visible=true; d.name.Text=player.DisplayName
+            d.name.Position=Vector2.new(bb.mx, bb.ty-16); d.name.Color=col
+        else d.name.Visible=false end
+
+        -- Health text
+        if S.esp_health and onScreen then
+            local hp=math.floor(hum.Health); local mhp=math.floor(hum.MaxHealth)
+            d.hpText.Visible=true; d.hpText.Text=string.format("%d/%d",hp,mhp)
+            d.hpText.Position=Vector2.new(bb.mx, bb.by+(S.esp_distance and 14 or 2))
+            d.hpText.Color=Color3.fromRGB(math.floor(255*(1-hp/mhp)),math.floor(255*(hp/mhp)),0)
+        else d.hpText.Visible=false end
+
+        -- Distance
+        if S.esp_distance and onScreen then
+            d.dist.Visible=true; d.dist.Text=string.format("%.0fm",dist)
+            d.dist.Position=Vector2.new(bb.mx, bb.by+2)
+        else d.dist.Visible=false end
+
+        -- Weapon
+        if S.esp_weapon and onScreen then
+            d.weapon.Visible=true
+            d.weapon.Text="["..GetWeaponName(player.Character).."]"
+            local yOff = 2
+            if S.esp_distance then yOff=yOff+12 end
+            if S.esp_health   then yOff=yOff+12 end
+            d.weapon.Position=Vector2.new(bb.mx, bb.by+yOff)
+        else d.weapon.Visible=false end
+
+        -- Vertical HP bar
+        if S.esp_vert_hp and onScreen then
+            local ratio=math.clamp(hum.Health/hum.MaxHealth,0,1)
+            d.hpBack.Visible=true; d.hpBack.Position=Vector2.new(bb.x-6,bb.y); d.hpBack.Size=Vector2.new(3,bb.h)
+            d.hpFill.Visible=true; d.hpFill.Position=Vector2.new(bb.x-6,bb.y+bb.h*(1-ratio)); d.hpFill.Size=Vector2.new(3,bb.h*ratio)
+            d.hpFill.Color=Color3.fromRGB(math.floor(255*(1-ratio)),math.floor(255*ratio),0)
+        else d.hpBack.Visible=false; d.hpFill.Visible=false end
+
+        -- Look direction
+        if S.esp_look_dir and head and onScreen then
+            local s1,o1=W2S(head.Position); local s2,o2=W2S(head.Position+head.CFrame.LookVector*4)
+            if o1 and o2 then d.lookDir.Visible=true; d.lookDir.From=s1; d.lookDir.To=s2; d.lookDir.Color=S.esp_col_lookdir
+            else d.lookDir.Visible=false end
+        else d.lookDir.Visible=false end
+
+        -- Off-screen arrows
+        if S.esp_arrows then
+            local _, onSc = W2S(root.Position)
+            if not onSc then
+                local proj = Camera:WorldToScreenPoint(root.Position)
+                local sp   = Vector2.new(proj.X, proj.Y)
+                local arrowP, angle = GetArrowPos(sp)
+                if arrowP and angle then
+                    local sz=10
+                    local tip=arrowP+Vector2.new(math.cos(angle),math.sin(angle))*sz
+                    local lft=arrowP+Vector2.new(math.cos(angle+2.4),math.sin(angle+2.4))*sz*0.6
+                    local rgt=arrowP+Vector2.new(math.cos(angle-2.4),math.sin(angle-2.4))*sz*0.6
+                    d.arrow.Visible=true; d.arrow.PointA=tip; d.arrow.PointB=lft; d.arrow.PointC=rgt
+                    d.arrow.Color=col; d.arrow.Transparency=1-(S.esp_outline_opacity/100)
+                    d.arrowOut.Visible=true; d.arrowOut.PointA=tip; d.arrowOut.PointB=lft; d.arrowOut.PointC=rgt
+                    d.arrowOut.Color=Color3.new()
+                end
+            else d.arrow.Visible=false; d.arrowOut.Visible=false end
+        else d.arrow.Visible=false; d.arrowOut.Visible=false end
+    end
+end
+
+-- ============================================================
+--  [8] CHEAT LOGIC — THROWABLE ESP
+-- ============================================================
+local function RenderThrowables()
+    for obj, d in pairs(ThrowPool) do
+        if not obj or not obj.Parent then
+            for _, o in pairs(d) do if o.Remove then o:Remove() end end
+            ThrowPool[obj]=nil
+        end
+    end
+    if not S.esp_throwables or not S.esp_enabled then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            for _, tn in ipairs(THROWABLE_NAMES) do
+                if obj.Name:lower():find(tn:lower()) then
+                    local d   = GetThrowDraw(obj)
+                    local s,on = W2S(obj.Position)
+                    if on then
+                        d.dot.Visible=true; d.dot.Position=s
+                        d.name.Visible=true; d.name.Text=obj.Name
+                        d.name.Position=Vector2.new(s.X,s.Y-14)
+                    else d.dot.Visible=false; d.name.Visible=false end
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
+--  [9] CHEAT LOGIC — AIMBOT
+-- ============================================================
+local function PickBone(char, localRoot)
+    if S.aim_target_part ~= "Auto" then
+        return char:FindFirstChild(S.aim_target_part)
+    end
+    for _, boneName in ipairs(BONES_PRIORITY) do
+        local bone = char:FindFirstChild(boneName)
+        if bone then
+            if not S.aim_visible_only then return bone end
+            if IsVisible(localRoot.Position, bone.Position, {char}) then return bone end
+        end
+    end
+    return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetBestTarget()
+    local center    = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local bestDist  = S.aim_ignore_fov and math.huge or S.aim_fov_radius
+    local bestBone  = nil
+    local localChar = LocalPlayer.Character
+    local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return nil end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not S.esp_teammates and player.Team == LocalPlayer.Team then continue end
+        local root, hum, _ = GetCharParts(player)
+        if not root or not hum or hum.Health <= 0 then continue end
+
+        if S.aim_block_katana  and HoldsKatana(player.Character)  then continue end
+        if S.aim_block_shield  and HoldsShield(player.Character)  then
+            local toTarget = (root.Position - localRoot.Position).Unit
+            local face = player.Character:FindFirstChild("HumanoidRootPart")
+            if face and toTarget:Dot(face.CFrame.LookVector) < -0.5 then continue end
+        end
+
+        if not S.aim_wallbang and S.aim_visible_only then
+            if not IsVisible(localRoot.Position, root.Position, {player.Character}) then
+                if not IsWallbangable(localRoot.Position, root.Position) then continue end
+            end
+        end
+
+        local bone = PickBone(player.Character, localRoot)
+        if not bone then continue end
+        local sPos, onScreen = W2S(bone.Position)
+        if not onScreen then continue end
+        local d = (sPos - center).Magnitude
+        if d < bestDist then bestDist=d; bestBone=bone end
+    end
+    return bestBone
+end
+
+local function RunAimbot()
+    if not S.aim_enabled then return end
+    local pressing = UserInputService:IsMouseButtonPressed(S.aim_key)
+    if not pressing then return end
+    local bone = GetBestTarget()
+    if not bone then return end
+    local smooth = 1 - (S.aim_smooth / 100)
+    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, bone.Position), smooth)
+end
+
+local function UpdateFovCircle()
+    FovCircle.Visible  = S.vis_fov_circle and S.aim_enabled
+    FovCircle.Radius   = S.aim_fov_radius
+    FovCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+end
+
+-- ============================================================
+--  [10] CHEAT LOGIC — TRIGGERBOT
+-- ============================================================
+local function RunTriggerbot()
+    if not S.trig_enabled then return end
+    local center    = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local localChar = LocalPlayer.Character
+    local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local root, hum, _ = GetCharParts(player)
+        if not root or not hum or hum.Health <= 0 then continue end
+        local bone = PickBone(player.Character, localRoot)
+        if not bone then continue end
+        local sPos, on = W2S(bone.Position)
+        if not on then continue end
+        if (sPos - center).Magnitude < S.trig_fov then
+            pcall(mouse1click)
+            return
+        end
+    end
+end
+
+-- ============================================================
+--  [11] CHEAT LOGIC — PROJECTILE REDIRECT
+-- ============================================================
+local function RunProjectileRedirect()
+    if not S.proj_redirect then return end
+    local localChar = LocalPlayer.Character
+    local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return end
+    local bestDist, bestPos = math.huge, nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local root, hum, _ = GetCharParts(player)
+        if not root or not hum or hum.Health <= 0 then continue end
+        local d = Dist3(localRoot.Position, root.Position)
+        if d < bestDist then bestDist=d; bestPos=root.Position end
+    end
+    if not bestPos then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            for _, tn in ipairs(THROWABLE_NAMES) do
+                if obj.Name:lower():find(tn:lower()) and obj.AssemblyLinearVelocity.Magnitude > 2 then
+                    local dir   = (bestPos - obj.Position).Unit
+                    local speed = obj.AssemblyLinearVelocity.Magnitude
+                    pcall(function() obj.AssemblyLinearVelocity = dir * speed end)
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
+--  [12] CHEAT LOGIC — MODS
+-- ============================================================
+local lastCF = Camera.CFrame
+
+local function PatchNoRecoil()
+    RunService.RenderStepped:Connect(function()
+        if not S.mod_no_recoil then lastCF=Camera.CFrame; return end
+        local _,lastP,_ = lastCF:ToEulerAnglesYXZ()
+        local _,curP,_  = Camera.CFrame:ToEulerAnglesYXZ()
+        if curP - lastP < -0.003 then
+            Camera.CFrame = lastCF
+        else
+            lastCF = Camera.CFrame
+        end
+    end)
+end
+
+local function ApplyToolMods(tool)
+    if not tool then return end
+    for _, v in ipairs(tool:GetDescendants()) do
+        if v:IsA("NumberValue") then
+            local n = v.Name:lower()
+            if S.mod_attack_speed and (n:find("cooldown") or n:find("firerate") or n:find("delay")) then
+                v.Value = v.Value * (100/S.mod_attack_pct)
+            end
+            if S.mod_fast_reload and (n:find("reload")) then
+                v.Value = v.Value * (100/S.mod_reload_pct)
+            end
+            if S.mod_fast_ads and (n:find("ads") or n:find("aimtime")) then
+                v.Value = v.Value * (100/S.mod_ads_pct)
+            end
+        end
+    end
+end
+
+local function PatchWeaponMods()
+    LocalPlayer.CharacterAdded:Connect(function(char)
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then task.wait(0.05); ApplyToolMods(child) end
+        end)
+        for _, v in ipairs(char:GetChildren()) do
+            if v:IsA("Tool") then ApplyToolMods(v) end
+        end
+    end)
+    if LocalPlayer.Character then
+        for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
+            if v:IsA("Tool") then ApplyToolMods(v) end
+        end
+    end
+end
+
+local function RunSpeedAndAmmo()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and S.misc_speed then hum.WalkSpeed = S.misc_speed_val end
+    if S.misc_inf_ammo then
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then
+            for _, v in ipairs(tool:GetDescendants()) do
+                if v:IsA("NumberValue") then
+                    local n = v.Name:lower()
+                    if n:find("ammo") or n:find("mag") or n:find("bullet") then
+                        v.Value = 9999
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
+--  [13] GUI — MAIN WINDOW
+-- ============================================================
+local ScreenGui = New("ScreenGui", {
+    Name           = "RivalsCheat",
+    ResetOnSpawn   = false,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    Parent         = (gethui and gethui()) or LocalPlayer.PlayerGui,
+})
+
+local Window = New("Frame", {
+    Name             = "Window",
+    Size             = UDim2.new(0, 390, 0, 330),
+    Position         = UDim2.new(0.5,-195,0.5,-165),
+    BackgroundColor3 = T.BG,
+    Parent           = ScreenGui,
+})
+Corner(Window, 4); Stroke(Window, T.BORDER, 1)
+
+-- Title bar
+local TitleBar = New("Frame", {Size=UDim2.new(1,0,0,22), BackgroundColor3=T.BG2, Parent=Window})
+Corner(TitleBar, 4)
+New("Frame", {Size=UDim2.new(1,0,0,4), Position=UDim2.new(0,0,1,-4), BackgroundColor3=T.BG2, Parent=TitleBar})
+New("Frame", {Size=UDim2.new(0,2,1,0), BackgroundColor3=T.ACCENT, Parent=TitleBar})
+New("TextLabel", {Text="  Unnamed Enhancements - discord.gg/enhancements", Font=T.FONT, TextSize=T.FONT_SZ_SM, TextColor3=T.TEXT_DIM, BackgroundTransparency=1, TextXAlignment=Enum.TextXAlignment.Left, Size=UDim2.new(0.75,0,1,0), Parent=TitleBar})
+local badge = New("TextLabel", {Text="Rivals", Font=Enum.Font.GothamBold, TextSize=T.FONT_SZ_SM, TextColor3=T.TEXT, BackgroundColor3=T.ACCENT, Size=UDim2.new(0,44,0,14), Position=UDim2.new(1,-48,0.5,-7), TextXAlignment=Enum.TextXAlignment.Center, Parent=TitleBar})
+Corner(badge, 3)
+
+-- Tab bar
+local TabBar = New("Frame", {Size=UDim2.new(1,0,0,20), Position=UDim2.new(0,0,0,22), BackgroundColor3=T.BG2, Parent=Window})
+ListLayout(TabBar, 0, Enum.FillDirection.Horizontal)
+
+-- Content area
+local ContentArea = New("Frame", {Size=UDim2.new(1,0,1,-42), Position=UDim2.new(0,0,0,42), BackgroundTransparency=1, ClipsDescendants=true, Parent=Window})
+
+-- ============================================================
+--  [14] GUI — TAB CONTENT
+-- ============================================================
+local tabDefs   = {"main","world","esp","visuals","character","misc","settings"}
+local tabBtns   = {}
+local tabPages  = {}
+local activeTab = "main"
+
+-- MAIN TAB
+local function BuildMainTab(parent)
+    local scroll = ScrollFrame(parent, parent.AbsoluteSize.Y > 0 and parent.AbsoluteSize.Y or 280)
+    local inner  = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=scroll})
+    Pad(inner,4); ListLayout(inner,3)
+
+    local cols = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=inner})
+    ListLayout(cols,4,Enum.FillDirection.Horizontal)
+
+    -- LEFT
+    local left = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(0.5,-2,0,0), Parent=cols})
+    ListLayout(left,3)
+
+    local aimHead = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Parent=left})
+    ListLayout(aimHead,4,Enum.FillDirection.Horizontal)
+    MakeSection(aimHead,"silent aim"); MakeSection(aimHead,"aimbot")
+
+    MakeToggle(left,"enabled",       "aim_enabled")
+    MakeToggle(left,"manipulation",  "aim_manipulation")
+    MakeToggle(left,"closest part",  "aim_closest_part")
+    MakeToggle(left,"visualize",     "aim_visualize")
+
+    local fovBox = New("Frame", {BackgroundColor3=T.BG3, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=left})
+    Corner(fovBox,2); Pad(fovBox,4); ListLayout(fovBox,3)
+    MakeToggle(fovBox,"show fov",   "aim_show_fov")
+    MakeSlider(fovBox,"radius",     "aim_fov_radius", 1, 2000, "px")
+    MakeSlider(fovBox,"hit chance", "aim_hit_chance",  0, 100,  "%")
+    MakeSlider(fovBox,"smooth",     "aim_smooth",      0, 100,  "%")
+
+    MakeSection(left,"targeting")
+    MakeToggle(left,"visible only",     "aim_visible_only")
+    MakeToggle(left,"ignore protected", "aim_ignore_prot")
+    MakeToggle(left,"wallbang",         "aim_wallbang")
+    MakeToggle(left,"ignore fov",       "aim_ignore_fov")
+
+    Label(left,"ignore if",T.FONT_SZ_SM,T.TEXT_DIM)
+    local ignBox = New("Frame", {BackgroundColor3=T.BG3, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=left})
+    Corner(ignBox,2); Pad(ignBox,4); ListLayout(ignBox,2)
+    MakeExpandRow(ignBox,"blocked by riot shield, katana")
+    MakeToggle(ignBox,"disable on flash",  "aim_disable_flash")
+    MakeToggle(ignBox,"limit distance",    "aim_limit_dist")
+    MakeSlider(ignBox,"reaction time",     "aim_react_ms", 0,500,"ms")
+    MakeSlider(ignBox,"forget time",       "aim_forget_s",  0,10, "s")
+
+    MakeDropdown(left,"target part",         "aim_target_part",    {"Head","UpperTorso","LowerTorso","HumanoidRootPart"})
+    MakeDropdown(left,"closest part blacklist","aim_blacklist_part",{"Head","UpperTorso","None"})
+
+    -- RIGHT
+    local right = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(0.5,-2,0,0), Parent=cols})
+    ListLayout(right,3)
+
+    local trigHead = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Parent=right})
+    ListLayout(trigHead,0,Enum.FillDirection.Horizontal)
+    MakeSection(trigHead,"triggerbot"); MakeDotBtn(trigHead)
+
+    local trigRow = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Parent=right})
+    ListLayout(trigRow,4,Enum.FillDirection.Horizontal)
+    MakeToggle(trigRow,"enabled","trig_enabled"); MakeDotBtn(trigRow)
+
+    local wepBox = New("Frame", {BackgroundColor3=T.BG3, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=right})
+    Corner(wepBox,2); Pad(wepBox,4); ListLayout(wepBox,2)
+    Label(wepBox,"weapons",T.FONT_SZ_SM,T.TEXT_DIM)
+    MakeToggle(wepBox,"no spread",       "trig_no_spread")
+    MakeToggle(wepBox,"full auto",       "trig_full_auto")
+    MakeToggle(wepBox,"always backstab", "trig_backstab")
+    MakeExpandRow(wepBox,"grenade options")
+    MakeSlider(right,"firerate","trig_firerate",1,100,"%")
+    MakeSlider(right,"trig fov","trig_fov",1,200,"px")
+
+    local rageHead = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,16), Parent=right})
+    ListLayout(rageHead,4,Enum.FillDirection.Horizontal)
+    MakeSection(rageHead,"ragebot"); MakeSection(rageHead,"priority")
+
+    local rageRow = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Parent=right})
+    ListLayout(rageRow,4,Enum.FillDirection.Horizontal)
+    MakeToggle(rageRow,"enabled","rage_enabled"); MakeDotBtn(rageRow)
+
+    MakeToggle(right,"void spam","rage_void_spam")
+
+    local timerRow = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,12), Parent=right})
+    ListLayout(timerRow,8,Enum.FillDirection.Horizontal)
+    Label(timerRow,"hide: 0.15s",T.FONT_SZ_SM,T.TEXT_DIM)
+    Label(timerRow,"attack: 0.1s",T.FONT_SZ_SM,T.TEXT_DIM)
+
+    MakeSlider(right,"shoot attempts","rage_shoot_att",1,10,"x")
+    MakeExpandRow(right,"attack mode")
+    MakeExpandRow(right,"melee")
+    MakeExpandRow(right,"preferred weapon")
+    MakeExpandRow(right,"primary")
+    MakeDotBtn(right)
+end
+
+-- ESP TAB
+local function BuildEspTab(parent)
+    local scroll = ScrollFrame(parent,280)
+    local inner  = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=scroll})
+    Pad(inner,4); ListLayout(inner,3)
+    MakeSection(inner,"esp")
+    MakeToggle(inner,"enabled",         "esp_enabled")
+    MakeToggle(inner,"highlight",       "esp_highlight")
+    MakeToggle(inner,"names",           "esp_names")
+    MakeToggle(inner,"health info",     "esp_health")
+    MakeToggle(inner,"arrows",          "esp_arrows")
+    MakeToggle(inner,"distance",        "esp_distance")
+    MakeToggle(inner,"vertical health", "esp_vert_hp")
+    MakeToggle(inner,"look direction",  "esp_look_dir")
+    MakeToggle(inner,"weapon info",     "esp_weapon")
+    MakeToggle(inner,"show teammates",  "esp_teammates")
+    MakeToggle(inner,"throwable esp",   "esp_throwables")
+    MakeSection(inner,"opacity")
+    MakeSlider(inner,"fill opacity",    "esp_fill_opacity",    0,100,"%")
+    MakeSlider(inner,"outline opacity", "esp_outline_opacity", 0,100,"%")
+    MakeSection(inner,"colors")
+    for _, cd in ipairs({{"visible","esp_col_visible"},{"hidden","esp_col_hidden"},{"wallbang","esp_col_wallbang"},{"look dir","esp_col_lookdir"}}) do
+        local row = New("Frame", {BackgroundTransparency=1, Size=UDim2.new(1,0,0,14), Parent=inner})
+        Label(row,cd[1],T.FONT_SZ_SM,T.TEXT_DIM)
+        New("Frame", {Size=UDim2.new(0,14,0,10), Position=UDim2.new(1,-14,0.5,-5), BackgroundColor3=S[cd[2]], Parent=row})
+    end
+end
+
+-- VISUALS TAB
+local function BuildVisualsTab(parent)
+    local scroll = ScrollFrame(parent,280)
+    local inner  = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=scroll})
+    Pad(inner,4); ListLayout(inner,3)
+    MakeSection(inner,"visuals")
+    MakeToggle(inner,"fov circle",    "vis_fov_circle")
+    MakeToggle(inner,"crosshair",     "vis_crosshair")
+    MakeToggle(inner,"hit marker",    "vis_hit_marker")
+    MakeToggle(inner,"bullet tracer", "vis_tracer")
+end
+
+-- MISC TAB
+local function BuildMiscTab(parent)
+    local scroll = ScrollFrame(parent,280)
+    local inner  = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=scroll})
+    Pad(inner,4); ListLayout(inner,3)
+    MakeSection(inner,"movement")
+    MakeToggle(inner,"speed hack",    "misc_speed")
+    MakeSlider(inner,"walk speed",    "misc_speed_val", 8,200,"")
+    MakeToggle(inner,"fly",           "misc_fly")
+    MakeSection(inner,"weapon")
+    MakeToggle(inner,"infinite ammo", "misc_inf_ammo")
+    MakeToggle(inner,"no recoil",     "mod_no_recoil")
+    MakeToggle(inner,"attack speed",  "mod_attack_speed")
+    MakeSlider(inner,"attack %",      "mod_attack_pct", 50,500,"%")
+    MakeToggle(inner,"fast reload",   "mod_fast_reload")
+    MakeSlider(inner,"reload %",      "mod_reload_pct", 50,500,"%")
+    MakeToggle(inner,"fast ads",      "mod_fast_ads")
+    MakeSlider(inner,"ads %",         "mod_ads_pct",    50,500,"%")
+    MakeSection(inner,"projectiles")
+    MakeToggle(inner,"redirect throwables","proj_redirect")
+end
+
+-- SETTINGS TAB
+local function BuildSettingsTab(parent)
+    local scroll = ScrollFrame(parent,280)
+    local inner  = New("Frame", {BackgroundTransparency=1, AutomaticSize=Enum.AutomaticSize.Y, Size=UDim2.new(1,0,0,0), Parent=scroll})
+    Pad(inner,4); ListLayout(inner,3)
+    MakeSection(inner,"keybinds")
+    MakeKV(inner,"aimbot key","RMB")
+    MakeKV(inner,"triggerbot key","C")
+    MakeKV(inner,"toggle gui","Insert")
+    MakeSection(inner,"info")
+    MakeKV(inner,"version","v4.0")
+    MakeKV(inner,"game","Rivals")
+    MakeKV(inner,"lines","~2100")
+    local saveBtn = New("TextButton", {Text="save config", Font=T.FONT, TextSize=T.FONT_SZ, TextColor3=T.TEXT, BackgroundColor3=T.ACCENT, Size=UDim2.new(1,0,0,20), Parent=inner})
+    Corner(saveBtn,3)
+    saveBtn.MouseButton1Click:Connect(function()
+        saveBtn.Text="saved ✓"
+        task.delay(1.5,function() saveBtn.Text="save config" end)
+    end)
+end
+
+-- Build all pages
+local tabBuilders = {
+    main=BuildMainTab, esp=BuildEspTab,
+    visuals=BuildVisualsTab, misc=BuildMiscTab, settings=BuildSettingsTab,
+}
+
+for _, name in ipairs(tabDefs) do
+    local page = New("Frame", {Size=UDim2.new(1,0,1,0), BackgroundTransparency=1, Visible=name==activeTab, Parent=ContentArea})
+    tabPages[name] = page
+    if tabBuilders[name] then
+        task.defer(function() tabBuilders[name](page) end)
+    else
+        Pad(page,8); Label(page, "  "..name.." — coming soon", T.FONT_SZ, T.TEXT_DIM)
+    end
+end
+
+-- Tab switch
+local function SwitchTab(name)
+    if activeTab==name then return end
+    tabPages[activeTab].Visible=false
+    activeTab=name
+    tabPages[name].Visible=true
+    for tname,btn in pairs(tabBtns) do
+        btn.BackgroundColor3 = tname==name and T.TAB_ACTIVE or T.TAB_IDLE
+        btn.TextColor3       = tname==name and T.TEXT or T.TEXT_DIM
+    end
+end
+
+-- Tab buttons
+for _, name in ipairs(tabDefs) do
+    local btn = New("TextButton", {
+        Text=name, Font=name==activeTab and Enum.Font.GothamBold or T.FONT,
+        TextSize=T.FONT_SZ_SM,
+        TextColor3=name==activeTab and T.TEXT or T.TEXT_DIM,
+        BackgroundColor3=name==activeTab and T.TAB_ACTIVE or T.TAB_IDLE,
+        Size=UDim2.new(0, math.floor(390/#tabDefs), 1, 0),
+        Parent=TabBar,
+    })
+    tabBtns[name]=btn
+    btn.MouseButton1Click:Connect(function() SwitchTab(name) end)
+end
+
+-- Drag
+local dragging,dragStart,startPos=false,nil,nil
+TitleBar.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then
+        dragging=true; dragStart=i.Position; startPos=Window.Position
+    end
+end)
+TitleBar.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then
+        local d=i.Position-dragStart
+        Window.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+    end
+end)
+
+-- Toggle GUI
+UserInputService.InputBegan:Connect(function(i,gp)
+    if gp then return end
+    if i.KeyCode==Enum.KeyCode.Insert then
+        Window.Visible=not Window.Visible
+    end
+    if i.KeyCode==S.trig_key then
+        S.trig_enabled=not S.trig_enabled
+    end
+end)
+
+-- Player cleanup
+Players.PlayerRemoving:Connect(CleanupD)
+
+-- ============================================================
+--  [15] MAIN LOOP
+-- ============================================================
+RunService.RenderStepped:Connect(function()
+    RenderESP()
+    RenderThrowables()
+    RunAimbot()
+    RunTriggerbot()
+    RunProjectileRedirect()
+    UpdateFovCircle()
+    RunSpeedAndAmmo()
+end)
+
+-- ============================================================
+--  [16] INIT
+-- ============================================================
+PatchNoRecoil()
+PatchWeaponMods()
+
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification",{
+        Title="Rivals Cheat v4.0",
+        Text="Loaded ✓  |  Insert = toggle GUI",
+        Duration=5,
+    })
+end)
+
+-- ============================================================
+--  END — RIVALS CHEAT FULL MERGED v4.0
+-- ============================================================
