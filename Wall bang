@@ -1,0 +1,347 @@
+--[[
+    ██╗    ██╗ █████╗ ██╗     ██╗     ██████╗  █████╗ ███╗   ██╗ ██████╗ 
+    ██║    ██║██╔══██╗██║     ██║     ██╔══██╗██╔══██╗████╗  ██║██╔════╝ 
+    ██║ █╗ ██║███████║██║     ██║     ██████╔╝███████║██╔██╗ ██║██║  ███╗
+    ██║███╗██║██╔══██║██║     ██║     ██╔══██╗██╔══██║██║╚██╗██║██║   ██║
+    ╚███╔███╔╝██║  ██║███████╗███████╗██████╔╝██║  ██║██║ ╚████║╚██████╔╝
+     ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+    
+    Game     : Roblox - Rivals
+    Feature  : Wallbang (shoot-through-walls hitbox projection)
+    Executor  : Synapse X / KRNL / Solara / Wave
+    Lua Ver  : Luau (Roblox)
+    For      : Jason brody 😭✌️
+--]]
+
+-----------------------------------------------------------------------
+-- SERVICES
+-----------------------------------------------------------------------
+local Players         = game:GetService("Players")
+local RunService      = game:GetService("RunService")
+local UserInputService= game:GetService("UserInputService")
+local Workspace       = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera      = Workspace.CurrentCamera
+local Mouse       = LocalPlayer:GetMouse()
+
+-----------------------------------------------------------------------
+-- CONFIG
+-----------------------------------------------------------------------
+local CFG = {
+    -- Wallbang core
+    Enabled          = true,
+    TeamCheck        = true,       -- skip teammates
+    WallbangKey      = Enum.KeyCode.Q,  -- hold to activate
+    MaxDistance      = 1000,       -- stud range
+    PenetrateRay     = true,       -- cast ray THROUGH geometry
+    HitboxSize       = Vector3.new(4, 5, 4), -- expanded hitbox on targets
+
+    -- Visual feedback
+    ShowHitbox       = true,       -- wireframe box on target
+    HitboxColor      = Color3.fromRGB(255, 50, 50),
+    HitboxTransp     = 0.5,
+
+    -- Aimlock assist while wallbanging
+    AimAssist        = true,
+    AimSmoothness    = 0.25,       -- 0 = snap, 1 = slow glide
+    TargetPart       = "HumanoidRootPart", -- aim point
+}
+
+-----------------------------------------------------------------------
+-- STATE
+-----------------------------------------------------------------------
+local Active       = false
+local HitboxParts  = {}   -- reference pool for wireframe boxes
+local CurrentTarget= nil
+
+-----------------------------------------------------------------------
+-- UTILITY: is player on enemy team?
+-----------------------------------------------------------------------
+local function isEnemy(player)
+    if not CFG.TeamCheck then return true end
+    if player.Team == nil or LocalPlayer.Team == nil then return true end
+    return player.Team ~= LocalPlayer.Team
+end
+
+-----------------------------------------------------------------------
+-- UTILITY: get character root + humanoid
+-----------------------------------------------------------------------
+local function getCharParts(player)
+    local char = player.Character
+    if not char then return nil, nil end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum  = char:FindFirstChildOfClass("Humanoid")
+    return root, hum
+end
+
+-----------------------------------------------------------------------
+-- WALLBANG CORE: penetrating raycast
+-- Standard raycast stops at first geometry hit.
+-- We keep recasting from the hit point, skipping geometry,
+-- until we reach a player part or exceed MaxDistance.
+-----------------------------------------------------------------------
+local function penetratingRaycast(origin, direction, maxDist)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    -- Collect all parts belonging to LocalPlayer's character
+    local ignoreList = {}
+    if LocalPlayer.Character then
+        for _, p in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if p:IsA("BasePart") then
+                table.insert(ignoreList, p)
+            end
+        end
+    end
+
+    local traveled    = 0
+    local currentOrigin = origin
+    local unitDir       = direction.Unit
+
+    local hitPlayer  = nil
+    local hitPart    = nil
+    local hitPos     = nil
+
+    while traveled < maxDist do
+        rayParams.FilterDescendantsInstances = ignoreList
+
+        local remaining = maxDist - traveled
+        local result = Workspace:Raycast(currentOrigin, unitDir * remaining, rayParams)
+
+        if not result then break end
+
+        traveled = traveled + (result.Position - currentOrigin).Magnitude
+        currentOrigin = result.Position + unitDir * 0.05  -- nudge past surface
+
+        -- Check if we hit a player part
+        local hit = result.Instance
+        if hit and hit.Parent then
+            local maybeChar = hit.Parent
+            local maybePlayer = Players:GetPlayerFromCharacter(maybeChar)
+            if maybePlayer and maybePlayer ~= LocalPlayer and isEnemy(maybePlayer) then
+                local _, hum = getCharParts(maybePlayer)
+                if hum and hum.Health > 0 then
+                    hitPlayer = maybePlayer
+                    hitPart   = hit
+                    hitPos    = result.Position
+                    break
+                end
+            end
+        end
+
+        -- Skip through this geometry piece next iteration
+        table.insert(ignoreList, hit)
+    end
+
+    return hitPlayer, hitPart, hitPos
+end
+
+-----------------------------------------------------------------------
+-- HITBOX VISUALISER: create or reuse a wireframe box
+-----------------------------------------------------------------------
+local HitboxFolder = Instance.new("Folder")
+HitboxFolder.Name  = "_WBHitboxes"
+HitboxFolder.Parent = Workspace
+
+local function getOrCreateBox(player)
+    if HitboxParts[player] then return HitboxParts[player] end
+
+    local box = Instance.new("SelectionBox")
+    box.Color3            = CFG.HitboxColor
+    box.LineThickness     = 0.06
+    box.SurfaceTransparency = CFG.HitboxTransp
+    box.SurfaceColor3     = CFG.HitboxColor
+    box.Parent            = HitboxFolder
+    HitboxParts[player]   = box
+    return box
+end
+
+local function clearBox(player)
+    if HitboxParts[player] then
+        HitboxParts[player]:Destroy()
+        HitboxParts[player] = nil
+    end
+end
+
+local function clearAllBoxes()
+    for p, _ in pairs(HitboxParts) do
+        clearBox(p)
+    end
+end
+
+-----------------------------------------------------------------------
+-- AIM ASSIST: smoothly rotate camera toward target root
+-----------------------------------------------------------------------
+local function aimAtTarget(targetRoot)
+    if not targetRoot then return end
+    local targetPos = targetRoot.Position
+    local camCF     = Camera.CFrame
+    local direction  = (targetPos - camCF.Position).Unit
+
+    local targetCF  = CFrame.lookAt(camCF.Position, camCF.Position + direction)
+    Camera.CFrame   = camCF:Lerp(targetCF, 1 - CFG.AimSmoothness)
+end
+
+-----------------------------------------------------------------------
+-- CLOSEST ENEMY THROUGH WALLS (used for aim assist selection)
+-----------------------------------------------------------------------
+local function findClosestEnemy()
+    local bestDist  = math.huge
+    local bestPlayer= nil
+    local bestRoot  = nil
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and isEnemy(p) then
+            local root, hum = getCharParts(p)
+            if root and hum and hum.Health > 0 then
+                local screenPos, onScreen = Camera:WorldToScreenPoint(root.Position)
+                if onScreen then
+                    local center = Vector2.new(Camera.ViewportSize.X / 2,
+                                               Camera.ViewportSize.Y / 2)
+                    local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                    if dist2D < bestDist then
+                        bestDist   = dist2D
+                        bestPlayer = p
+                        bestRoot   = root
+                    end
+                end
+            end
+        end
+    end
+    return bestPlayer, bestRoot
+end
+
+-----------------------------------------------------------------------
+-- EXPANDED HITBOX: temporarily grow target parts for easier hits
+-----------------------------------------------------------------------
+local OriginalSizes = {}
+
+local function expandHitbox(player)
+    local char = player.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and not OriginalSizes[part] then
+            OriginalSizes[part] = part.Size
+            part.Size = CFG.HitboxSize
+        end
+    end
+end
+
+local function restoreHitbox(player)
+    local char = player.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and OriginalSizes[part] then
+            part.Size = OriginalSizes[part]
+            OriginalSizes[part] = nil
+        end
+    end
+end
+
+local function restoreAllHitboxes()
+    for _, p in ipairs(Players:GetPlayers()) do
+        restoreHitbox(p)
+    end
+end
+
+-----------------------------------------------------------------------
+-- MAIN LOOP
+-----------------------------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    if not CFG.Enabled then
+        clearAllBoxes()
+        restoreAllHitboxes()
+        return
+    end
+
+    Active = UserInputService:IsKeyDown(CFG.WallbangKey)
+
+    if not Active then
+        clearAllBoxes()
+        restoreAllHitboxes()
+        CurrentTarget = nil
+        return
+    end
+
+    -- Cast a penetrating ray from camera through crosshair
+    local origin    = Camera.CFrame.Position
+    local direction = Camera.CFrame.LookVector
+
+    local hitPlayer, hitPart, _ = penetratingRaycast(origin, direction, CFG.MaxDistance)
+
+    -- Restore previous target hitbox if target changed
+    if CurrentTarget and CurrentTarget ~= hitPlayer then
+        restoreHitbox(CurrentTarget)
+        clearBox(CurrentTarget)
+    end
+
+    CurrentTarget = hitPlayer
+
+    if hitPlayer then
+        -- Expand hitbox
+        expandHitbox(hitPlayer)
+
+        -- Draw wireframe box
+        if CFG.ShowHitbox then
+            local box = getOrCreateBox(hitPlayer)
+            local root = hitPlayer.Character and hitPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                box.Adornee = root
+            end
+        end
+
+        -- Aim assist
+        if CFG.AimAssist then
+            local root = hitPlayer.Character and
+                         hitPlayer.Character:FindFirstChild(CFG.TargetPart)
+            aimAtTarget(root)
+        end
+    else
+        -- No wall target — still run aim assist on nearest visible enemy
+        if CFG.AimAssist then
+            local _, root = findClosestEnemy()
+            aimAtTarget(root)
+        end
+    end
+end)
+
+-----------------------------------------------------------------------
+-- TOGGLE KEY (double-tap WallbangKey = toggle CFG.Enabled)
+-----------------------------------------------------------------------
+local lastTap = 0
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == CFG.WallbangKey then
+        local now = tick()
+        if now - lastTap < 0.35 then
+            CFG.Enabled = not CFG.Enabled
+            if not CFG.Enabled then
+                clearAllBoxes()
+                restoreAllHitboxes()
+            end
+            print("[WallBang] " .. (CFG.Enabled and "ON ✅" or "OFF ❌"))
+        end
+        lastTap = now
+    end
+end)
+
+-----------------------------------------------------------------------
+-- CLEANUP on character respawn
+-----------------------------------------------------------------------
+LocalPlayer.CharacterAdded:Connect(function()
+    OriginalSizes = {}
+    clearAllBoxes()
+    CurrentTarget = nil
+end)
+
+-----------------------------------------------------------------------
+-- BOOT MSG
+-----------------------------------------------------------------------
+print([[
+╔══════════════════════════════╗
+║   RIVALS WALLBANG  LOADED    ║
+║   Hold [Q]  → activate       ║
+║   Double-tap [Q] → toggle    ║
+╚══════════════════════════════╝
+]])
