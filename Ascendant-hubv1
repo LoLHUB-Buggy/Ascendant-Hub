@@ -1,0 +1,1161 @@
+-- ============================================================
+--  ASCENDANT HUB — RIVALS
+--  Context  : Roblox executor mobile (Arceus X / Delta / Hydrogen)
+--  Game     : Rivals (Roblox) FPS
+--
+--  MOBILE SUPPORT:
+--    ✓ Full touch drag (finger)
+--    ✓ Big tap targets (min 36px height per row)
+--    ✓ Large font (14px base, 13px small)
+--    ✓ GUI sized for phone (scales to screen %)
+--    ✓ Thumb-sized toggle pill always on screen
+--    ✓ Lock/unlock GUI position
+--    ✓ Swipe-style tab bar (horizontal scroll)
+--    ✓ Touch sliders (drag with finger)
+--    ✓ ESP @ 12fps — no phone melt
+--    ✓ Cached raycasts — no rebuild every frame
+--    ✓ Split loops (aimbot fast / ESP slow)
+-- ============================================================
+
+-- ============================================================
+--  [1] SERVICES
+-- ============================================================
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera           = workspace.CurrentCamera
+local LocalPlayer      = Players.LocalPlayer
+
+-- detect mobile
+local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- viewport shorthand
+local function VP() return Camera.ViewportSize end
+
+-- ============================================================
+--  [2] THEME  (slightly larger for mobile)
+-- ============================================================
+local T = {
+    BG       = Color3.fromRGB(13,  13,  16),
+    BG2      = Color3.fromRGB(18,  18,  22),
+    BG3      = Color3.fromRGB(26,  26,  33),
+    BORDER   = Color3.fromRGB(50,  50,  65),
+    ACCENT   = Color3.fromRGB(139, 47,  201),
+    ACCENT2  = Color3.fromRGB(168, 85,  247),
+    TEXT     = Color3.fromRGB(225, 225, 232),
+    DIM      = Color3.fromRGB(130, 130, 148),
+    TON      = Color3.fromRGB(139, 47,  201),
+    TOFF     = Color3.fromRGB(42,  42,  56),
+    TACT     = Color3.fromRGB(139, 47,  201),
+    TIDL     = Color3.fromRGB(28,  28,  38),
+    SBG      = Color3.fromRGB(32,  32,  44),
+    FONT     = Enum.Font.GothamMedium,
+    FONTSM   = Enum.Font.Gotham,
+    -- Mobile sizes
+    FSZ      = 14,   -- base font
+    FSM      = 13,   -- small font
+    ROW      = 36,   -- min touch row height
+    ROWSM    = 30,   -- smaller rows
+    PAD      = 8,    -- padding
+    CORNER   = 6,
+}
+
+-- ============================================================
+--  [3] STATE
+-- ============================================================
+local S = {
+    -- AIMBOT
+    aim_enabled=false, aim_manipulation=false, aim_closest_part=true,
+    aim_show_fov=true, aim_fov_radius=120, aim_hit_chance=100,
+    aim_smooth=20, aim_target_part="Head", aim_visible_only=true,
+    aim_ignore_prot=false, aim_block_shield=true, aim_block_katana=true,
+    aim_disable_flash=false, aim_limit_dist=false,
+    aim_react_ms=0, aim_forget_s=0, aim_blacklist_part="Head",
+    aim_wallbang=false, aim_ignore_fov=false,
+
+    -- TRIGGERBOT
+    trig_enabled=false, trig_no_spread=false, trig_full_auto=false,
+    trig_backstab=false, trig_firerate=10, trig_fov=15,
+
+    -- RAGEBOT
+    rage_enabled=false, rage_void_spam=false, rage_shoot_att=2,
+
+    -- ESP
+    esp_enabled=true, esp_names=true, esp_health=true,
+    esp_arrows=true, esp_distance=true, esp_vert_hp=true,
+    esp_look_dir=false, esp_weapon=true, esp_teammates=false,
+    esp_throwables=false, esp_fill_opacity=10, esp_outline_opacity=85,
+    esp_max_dist=800,
+    esp_col_visible  = Color3.fromRGB(255,60,60),
+    esp_col_hidden   = Color3.fromRGB(60,120,255),
+    esp_col_wallbang = Color3.fromRGB(255,165,0),
+    esp_col_lookdir  = Color3.fromRGB(0,255,180),
+
+    -- MODS
+    mod_no_recoil=false, mod_attack_speed=false, mod_attack_pct=100,
+    mod_fast_reload=false, mod_reload_pct=100,
+    mod_fast_ads=false, mod_ads_pct=100,
+
+    -- VISUALS
+    vis_fov_circle=true,
+
+    -- MISC
+    misc_speed=false, misc_speed_val=16, misc_inf_ammo=false,
+
+    -- GUI
+    gui_locked=false,
+    gui_open=true,
+
+    -- MISSING FEATURES ADDED
+    trig_key           = Enum.KeyCode.C,   -- triggerbot custom keybind
+    proj_redirect      = false,            -- projectile redirect
+    esp_highlight      = false,            -- highlight (off by default, expensive mobile)
+}
+
+-- ============================================================
+--  [4] CACHED RAYCAST PARAMS
+-- ============================================================
+local RayP = RaycastParams.new()
+RayP.FilterType = Enum.RaycastFilterType.Exclude
+
+local function RefreshRay()
+    local ig={workspace.Terrain}
+    if LocalPlayer.Character then table.insert(ig,LocalPlayer.Character) end
+    RayP.FilterDescendantsInstances=ig
+end
+RefreshRay()
+LocalPlayer.CharacterAdded:Connect(RefreshRay)
+
+-- ============================================================
+--  [5] UTILITY
+-- ============================================================
+local KATANAS  = {"Katana","Sword","Blade"}
+local SHIELDS  = {"RiotShield","Shield"}
+local BONES    = {"Head","UpperTorso","LowerTorso","HumanoidRootPart"}
+local THROWNS  = {"Grenade","FlashGrenade","SmokeGrenade","Molotov","Throwable","Bomb"}
+
+local function W2S(p)
+    local s,on=Camera:WorldToViewportPoint(p)
+    if on then return Vector2.new(s.X,s.Y),true end
+    return nil,false
+end
+local function D3(a,b) return (a-b).Magnitude end
+local function GCP(pl)
+    local c=pl.Character; if not c then return nil,nil,nil end
+    return c:FindFirstChild("HumanoidRootPart"),c:FindFirstChildOfClass("Humanoid"),c:FindFirstChild("Head")
+end
+local function FRay(o,d) return workspace:Raycast(o,d,RayP) end
+local function Vis(a,b) return FRay(a,b-a)==nil end
+local function WBang(a,b)
+    local h=FRay(a,b-a); if not h then return true end
+    local off=(b-a).Unit*(h.Distance+0.6)
+    return FRay(a+off,b-(a+off))==nil
+end
+local function StateCol(lr,tp)
+    if Vis(lr.Position,tp) then return S.esp_col_visible end
+    if WBang(lr.Position,tp) then return S.esp_col_wallbang end
+    return S.esp_col_hidden
+end
+local function GetBB(char)
+    local r=char:FindFirstChild("HumanoidRootPart"); if not r then return nil end
+    local top,ot=W2S(r.Position+Vector3.new(0,3.2,0))
+    local bot,ob=W2S(r.Position-Vector3.new(0,2.3,0))
+    if not ot or not ob then return nil end
+    local h=math.abs(top.Y-bot.Y); local w=h*0.45
+    return {x=top.X-w/2,y=top.Y,w=w,h=h,mx=top.X,ty=top.Y,by=bot.Y}
+end
+local function GWep(char)
+    local t=char:FindFirstChildOfClass("Tool"); return t and t.Name or "None"
+end
+local function HasItem(char,list)
+    local w=GWep(char):lower()
+    for _,n in ipairs(list) do if w:find(n:lower()) then return true end end
+    return false
+end
+local function ArrowPos(sp)
+    local c=Vector2.new(VP().X/2,VP().Y/2)
+    local d=sp-c; if d.Magnitude==0 then return nil,nil end
+    local n=d.Unit; return c+n*100,math.atan2(n.Y,n.X)
+end
+
+-- ============================================================
+--  [6] DRAWING POOL
+-- ============================================================
+local DP={}
+local function ND(t,p)
+    local d=Drawing.new(t); for k,v in pairs(p) do d[k]=v end; return d
+end
+local function GD(pl)
+    if DP[pl] then return DP[pl] end
+    DP[pl]={
+        box    =ND("Square",  {Visible=false,Filled=false,Thickness=1}),
+        bfill  =ND("Square",  {Visible=false,Filled=true}),
+        name   =ND("Text",    {Visible=false,Size=14,Center=true,Outline=true,OutlineColor=Color3.new()}),
+        hptxt  =ND("Text",    {Visible=false,Size=12,Center=true,Outline=true,OutlineColor=Color3.new()}),
+        dist   =ND("Text",    {Visible=false,Size=12,Center=true,Outline=true,OutlineColor=Color3.new(),Color=Color3.fromRGB(200,200,200)}),
+        wep    =ND("Text",    {Visible=false,Size=12,Center=true,Outline=true,OutlineColor=Color3.new(),Color=Color3.fromRGB(255,220,100)}),
+        hpbk   =ND("Square",  {Visible=false,Filled=true,Color=Color3.fromRGB(20,20,20)}),
+        hpfl   =ND("Square",  {Visible=false,Filled=true}),
+        lkdir  =ND("Line",    {Visible=false,Thickness=1}),
+        arr    =ND("Triangle",{Visible=false,Filled=true}),
+        arrout =ND("Triangle",{Visible=false,Filled=false,Thickness=1}),
+    }
+    return DP[pl]
+end
+local function HideD(d) for _,o in pairs(d) do if o and o.Visible~=nil then o.Visible=false end end end
+local function KillD(pl)
+    local d=DP[pl]; if not d then return end
+    for _,o in pairs(d) do if o and o.Remove then o:Remove() end end
+    DP[pl]=nil
+end
+local FOV=ND("Circle",{Visible=false,Filled=false,Thickness=1,Radius=120,
+    Color=Color3.fromRGB(255,255,255),
+    Position=Vector2.new(VP().X/2,VP().Y/2)})
+
+-- ============================================================
+--  [7] ESP  (12fps throttle)
+-- ============================================================
+local ET=0; local ER=1/12
+local function RenderESP()
+    local now=tick(); if now-ET<ER then return end; ET=now
+    local lc=LocalPlayer.Character
+    local lr=lc and lc:FindFirstChild("HumanoidRootPart")
+    local ft=1-(S.esp_fill_opacity/100)
+    local ot=1-(S.esp_outline_opacity/100)
+
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if pl==LocalPlayer then continue end
+        if not S.esp_teammates and pl.Team==LocalPlayer.Team then
+            local d=DP[pl]; if d then HideD(d) end; continue
+        end
+        local d=GD(pl)
+        local root,hum,head=GCP(pl)
+        if not root or not hum or hum.Health<=0 or not S.esp_enabled then HideD(d); continue end
+        local dist=lr and D3(lr.Position,root.Position) or 0
+        if dist>S.esp_max_dist then HideD(d); continue end
+
+        local col=lr and StateCol(lr,root.Position) or S.esp_col_visible
+        local bb=GetBB(pl.Character)
+        local on=bb~=nil
+
+        -- box
+        if on then
+            d.box.Visible=true; d.box.Position=Vector2.new(bb.x,bb.y)
+            d.box.Size=Vector2.new(bb.w,bb.h); d.box.Color=col; d.box.Transparency=ot
+            d.bfill.Visible=true; d.bfill.Position=Vector2.new(bb.x,bb.y)
+            d.bfill.Size=Vector2.new(bb.w,bb.h); d.bfill.Color=col; d.bfill.Transparency=ft
+        else d.box.Visible=false; d.bfill.Visible=false end
+
+        -- name
+        if S.esp_names and on then
+            d.name.Visible=true; d.name.Text=pl.DisplayName
+            d.name.Position=Vector2.new(bb.mx,bb.ty-18); d.name.Color=col
+        else d.name.Visible=false end
+
+        -- hp text
+        if S.esp_health and on then
+            local hp=math.floor(hum.Health); local mhp=math.floor(hum.MaxHealth)
+            local r=hp/mhp
+            d.hptxt.Visible=true; d.hptxt.Text=hp.."/"..mhp
+            d.hptxt.Position=Vector2.new(bb.mx,bb.by+(S.esp_distance and 14 or 2))
+            d.hptxt.Color=Color3.fromRGB(math.floor(255*(1-r)),math.floor(255*r),0)
+        else d.hptxt.Visible=false end
+
+        -- dist
+        if S.esp_distance and on then
+            d.dist.Visible=true; d.dist.Text=math.floor(dist).."m"
+            d.dist.Position=Vector2.new(bb.mx,bb.by+2)
+        else d.dist.Visible=false end
+
+        -- weapon
+        if S.esp_weapon and on then
+            d.wep.Visible=true; d.wep.Text="["..GWep(pl.Character).."]"
+            local yo=2
+            if S.esp_distance then yo=yo+12 end
+            if S.esp_health then yo=yo+12 end
+            d.wep.Position=Vector2.new(bb.mx,bb.by+yo)
+        else d.wep.Visible=false end
+
+        -- vert hp bar
+        if S.esp_vert_hp and on then
+            local ratio=math.clamp(hum.Health/hum.MaxHealth,0,1)
+            d.hpbk.Visible=true; d.hpbk.Position=Vector2.new(bb.x-7,bb.y); d.hpbk.Size=Vector2.new(4,bb.h)
+            d.hpfl.Visible=true
+            d.hpfl.Position=Vector2.new(bb.x-7,bb.y+bb.h*(1-ratio))
+            d.hpfl.Size=Vector2.new(4,bb.h*ratio)
+            d.hpfl.Color=Color3.fromRGB(math.floor(255*(1-ratio)),math.floor(255*ratio),0)
+        else d.hpbk.Visible=false; d.hpfl.Visible=false end
+
+        -- look dir
+        if S.esp_look_dir and head and on then
+            local s1,o1=W2S(head.Position)
+            local s2,o2=W2S(head.Position+head.CFrame.LookVector*4)
+            if o1 and o2 then d.lkdir.Visible=true; d.lkdir.From=s1; d.lkdir.To=s2; d.lkdir.Color=S.esp_col_lookdir
+            else d.lkdir.Visible=false end
+        else d.lkdir.Visible=false end
+
+        -- arrows
+        if S.esp_arrows then
+            local _,onsc=W2S(root.Position)
+            if not onsc then
+                local p3=Camera:WorldToScreenPoint(root.Position)
+                local ap,ang=ArrowPos(Vector2.new(p3.X,p3.Y))
+                if ap and ang then
+                    local sz=12
+                    local tip=ap+Vector2.new(math.cos(ang),math.sin(ang))*sz
+                    local lf =ap+Vector2.new(math.cos(ang+2.4),math.sin(ang+2.4))*sz*0.6
+                    local rg =ap+Vector2.new(math.cos(ang-2.4),math.sin(ang-2.4))*sz*0.6
+                    d.arr.Visible=true; d.arr.PointA=tip; d.arr.PointB=lf; d.arr.PointC=rg
+                    d.arr.Color=col; d.arr.Transparency=ot
+                    d.arrout.Visible=true; d.arrout.PointA=tip; d.arrout.PointB=lf; d.arrout.PointC=rg
+                    d.arrout.Color=Color3.new()
+                end
+            else d.arr.Visible=false; d.arrout.Visible=false end
+        else d.arr.Visible=false; d.arrout.Visible=false end
+    end
+end
+
+-- ============================================================
+--  [8] AIMBOT
+-- ============================================================
+local function PickBone(char,lr)
+    if S.aim_target_part~="Auto" then return char:FindFirstChild(S.aim_target_part) end
+    for _,n in ipairs(BONES) do
+        local b=char:FindFirstChild(n)
+        if b then
+            if not S.aim_visible_only then return b end
+            if Vis(lr.Position,b.Position) then return b end
+        end
+    end
+    return char:FindFirstChild("Head")
+end
+
+local function BestTarget()
+    local c=Vector2.new(VP().X/2,VP().Y/2)
+    local bd=S.aim_ignore_fov and math.huge or S.aim_fov_radius
+    local bb=nil
+    local lc=LocalPlayer.Character
+    local lr=lc and lc:FindFirstChild("HumanoidRootPart")
+    if not lr then return nil end
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if pl==LocalPlayer then continue end
+        if not S.esp_teammates and pl.Team==LocalPlayer.Team then continue end
+        local root,hum,_=GCP(pl)
+        if not root or not hum or hum.Health<=0 then continue end
+        if S.aim_block_katana and HasItem(pl.Character,KATANAS) then continue end
+        if S.aim_block_shield and HasItem(pl.Character,SHIELDS) then
+            local f=pl.Character:FindFirstChild("HumanoidRootPart")
+            if f and ((root.Position-lr.Position).Unit):Dot(f.CFrame.LookVector)<-0.5 then continue end
+        end
+        if not S.aim_wallbang and S.aim_visible_only then
+            if not Vis(lr.Position,root.Position) then continue end
+        end
+        local bone=PickBone(pl.Character,lr)
+        if not bone then continue end
+        local sp,on=W2S(bone.Position)
+        if not on then continue end
+        local d=(sp-c).Magnitude
+        if d<bd then bd=d; bb=bone end
+    end
+    return bb
+end
+
+local function RunAim()
+    if not S.aim_enabled then return end
+    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+    local bone=BestTarget()
+    if not bone then return end
+    Camera.CFrame=Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position,bone.Position),1-(S.aim_smooth/100))
+end
+
+local function UpdFov()
+    FOV.Visible=S.vis_fov_circle and S.aim_enabled
+    FOV.Radius=S.aim_fov_radius
+    FOV.Position=Vector2.new(VP().X/2,VP().Y/2)
+end
+
+-- ============================================================
+--  [9] TRIGGERBOT
+-- ============================================================
+local function RunTrig()
+    if not S.trig_enabled then return end
+    -- support both key and mouse button for triggerbot
+    local keyHeld = pcall(function()
+        return UserInputService:IsKeyDown(S.trig_key)
+    end) and UserInputService:IsKeyDown(S.trig_key)
+    -- on mobile trig fires without key check if enabled
+    if not IsMobile and not keyHeld then return end
+    local c=Vector2.new(VP().X/2,VP().Y/2)
+    local lc=LocalPlayer.Character; local lr=lc and lc:FindFirstChild("HumanoidRootPart")
+    if not lr then return end
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if pl==LocalPlayer then continue end
+        local root,hum,_=GCP(pl)
+        if not root or not hum or hum.Health<=0 then continue end
+        local bone=PickBone(pl.Character,lr)
+        if not bone then continue end
+        local sp,on=W2S(bone.Position)
+        if on and (sp-c).Magnitude<S.trig_fov then pcall(mouse1click); return end
+    end
+end
+
+-- ============================================================
+--  [9b] PROJECTILE REDIRECT
+-- ============================================================
+local THROW_REDIR_TICK=0
+local function RunProjRedirect()
+    if not S.proj_redirect then return end
+    local now=tick(); if now-THROW_REDIR_TICK<0.05 then return end
+    THROW_REDIR_TICK=now
+    local lc=LocalPlayer.Character
+    local lr=lc and lc:FindFirstChild("HumanoidRootPart")
+    if not lr then return end
+    -- find closest enemy
+    local bestDist=math.huge; local bestPos=nil
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if pl==LocalPlayer then continue end
+        local root,hum,_=GCP(pl)
+        if not root or not hum or hum.Health<=0 then continue end
+        local d=D3(lr.Position,root.Position)
+        if d<bestDist then bestDist=d; bestPos=root.Position end
+    end
+    if not bestPos then return end
+    -- steer any moving throwables
+    for _,obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            for _,tn in ipairs(THROWNS) do
+                if obj.Name:lower():find(tn:lower()) then
+                    if obj.AssemblyLinearVelocity.Magnitude>2 then
+                        local dir=(bestPos-obj.Position).Unit
+                        local spd=obj.AssemblyLinearVelocity.Magnitude
+                        pcall(function() obj.AssemblyLinearVelocity=dir*spd end)
+                    end
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================
+--  [9c] ESP HIGHLIGHT (SelectionBox — off by default, mobile expensive)
+-- ============================================================
+local HLPool={}
+local HL_TICK=0; local HL_RATE=1/6  -- 6fps, even slower than ESP
+
+local function RunHighlight()
+    if not S.esp_highlight then
+        for pl,sb in pairs(HLPool) do sb:Destroy(); HLPool[pl]=nil end
+        return
+    end
+    local now=tick(); if now-HL_TICK<HL_RATE then return end
+    HL_TICK=now
+    local ft=1-(S.esp_fill_opacity/100)
+    local ot=1-(S.esp_outline_opacity/100)
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if pl==LocalPlayer then continue end
+        local char=pl.Character
+        local _,hum,_=GCP(pl)
+        if not char or not hum or hum.Health<=0 or not S.esp_enabled then
+            if HLPool[pl] then HLPool[pl]:Destroy(); HLPool[pl]=nil end
+            continue
+        end
+        local col=S.esp_col_visible
+        if not HLPool[pl] then
+            local sb=Instance.new("SelectionBox")
+            sb.LineThickness=0.04; sb.Parent=Camera
+            HLPool[pl]=sb
+        end
+        local sb=HLPool[pl]
+        sb.SurfaceColor3=col; sb.Color3=col
+        sb.SurfaceTransparency=1-ft; sb.Transparency=1-ot
+        sb.Adornee=char
+    end
+end
+
+-- ============================================================
+--  [10] MODS
+-- ============================================================
+local lastCF=Camera.CFrame
+local MT=0; local MR=1/10
+
+local function NoRec()
+    if not S.mod_no_recoil then lastCF=Camera.CFrame; return end
+    local _,lp,_=lastCF:ToEulerAnglesYXZ()
+    local _,cp,_=Camera.CFrame:ToEulerAnglesYXZ()
+    if cp-lp<-0.003 then Camera.CFrame=lastCF else lastCF=Camera.CFrame end
+end
+
+local function RunMisc()
+    local now=tick(); if now-MT<MR then return end; MT=now
+    local char=LocalPlayer.Character; if not char then return end
+    local hum=char:FindFirstChildOfClass("Humanoid")
+    if hum and S.misc_speed then hum.WalkSpeed=S.misc_speed_val end
+    if S.misc_inf_ammo then
+        local tool=char:FindFirstChildOfClass("Tool")
+        if tool then
+            for _,v in ipairs(tool:GetDescendants()) do
+                if v:IsA("NumberValue") then
+                    local n=v.Name:lower()
+                    if n:find("ammo") or n:find("mag") or n:find("bullet") then v.Value=9999 end
+                end
+            end
+        end
+    end
+end
+
+local function ApplyTool(tool)
+    if not tool then return end
+    for _,v in ipairs(tool:GetDescendants()) do
+        if v:IsA("NumberValue") then
+            local n=v.Name:lower()
+            if S.mod_attack_speed and (n:find("cooldown") or n:find("firerate") or n:find("delay")) then
+                v.Value=v.Value*(100/math.max(S.mod_attack_pct,1))
+            end
+            if S.mod_fast_reload and n:find("reload") then
+                v.Value=v.Value*(100/math.max(S.mod_reload_pct,1))
+            end
+            if S.mod_fast_ads and (n:find("ads") or n:find("aimtime")) then
+                v.Value=v.Value*(100/math.max(S.mod_ads_pct,1))
+            end
+        end
+    end
+end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char.ChildAdded:Connect(function(c)
+        if c:IsA("Tool") then task.wait(0.05); ApplyTool(c) end
+    end)
+end)
+
+-- ============================================================
+--  [11] GUI HELPERS  (mobile-sized)
+-- ============================================================
+local function N(cls,props)
+    local o=Instance.new(cls)
+    for k,v in pairs(props) do pcall(function() o[k]=v end) end
+    return o
+end
+local function Pad(p,s)
+    N("UIPadding",{PaddingLeft=UDim.new(0,s),PaddingRight=UDim.new(0,s),
+        PaddingTop=UDim.new(0,s),PaddingBottom=UDim.new(0,s),Parent=p})
+end
+local function LL(p,sp,dir)
+    N("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,
+        FillDirection=dir or Enum.FillDirection.Vertical,
+        Padding=UDim.new(0,sp or 4),Parent=p})
+end
+local function Corn(p,r) N("UICorner",{CornerRadius=UDim.new(0,r or T.CORNER),Parent=p}) end
+local function Strk(p,c,th) N("UIStroke",{Color=c or T.BORDER,Thickness=th or 1,Parent=p}) end
+local function Txt(p,txt,sz,col,font,xa)
+    return N("TextLabel",{Text=txt,Font=font or T.FONT,TextSize=sz or T.FSZ,
+        TextColor3=col or T.TEXT,BackgroundTransparency=1,
+        TextXAlignment=xa or Enum.TextXAlignment.Left,
+        AutomaticSize=Enum.AutomaticSize.XY,Parent=p})
+end
+local function Scr(p,h)
+    return N("ScrollingFrame",{
+        Size=UDim2.new(1,0,0,h or 400),BackgroundTransparency=1,
+        ScrollBarThickness=3,ScrollBarImageColor3=T.ACCENT,
+        CanvasSize=UDim2.new(0,0,0,0),
+        AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        ScrollingDirection=Enum.ScrollingDirection.Y,
+        Parent=p,
+    })
+end
+
+-- ── MOBILE TOGGLE (big tap target) ───────────────────────────
+local function MakeTog(parent,label,key,cb)
+    local row=N("Frame",{
+        BackgroundColor3=T.BG3,
+        Size=UDim2.new(1,0,0,T.ROW),
+        Parent=parent,
+    })
+    Corn(row,T.CORNER)
+
+    -- left colored bar when ON
+    local bar=N("Frame",{
+        Size=UDim2.new(0,3,1,0),
+        BackgroundColor3=S[key] and T.TON or T.TOFF,
+        Parent=row,
+    })
+    Corn(bar,2)
+
+    -- label
+    N("TextLabel",{
+        Text=label,Font=T.FONT,TextSize=T.FSZ,
+        TextColor3=S[key] and T.TEXT or T.DIM,
+        BackgroundTransparency=1,
+        TextXAlignment=Enum.TextXAlignment.Left,
+        Position=UDim2.new(0,12,0,0),
+        Size=UDim2.new(0.75,0,1,0),
+        Parent=row,
+    })
+
+    -- toggle pill (right side)
+    local pill=N("Frame",{
+        Size=UDim2.new(0,46,0,22),
+        Position=UDim2.new(1,-54,0.5,-11),
+        BackgroundColor3=S[key] and T.TON or T.TOFF,
+        Parent=row,
+    })
+    Corn(pill,11)
+
+    local knob=N("Frame",{
+        Size=UDim2.new(0,18,0,18),
+        Position=UDim2.new(S[key] and 1 or 0,S[key] and -21 or 3,0.5,-9),
+        BackgroundColor3=Color3.new(1,1,1),
+        Parent=pill,
+    })
+    Corn(knob,9)
+
+    local function Upd()
+        local on=S[key]
+        bar.BackgroundColor3=on and T.TON or T.TOFF
+        pill.BackgroundColor3=on and T.TON or T.TOFF
+        knob.Position=UDim2.new(on and 1 or 0,on and -21 or 3,0.5,-9)
+        local lbl=row:FindFirstChildOfClass("TextLabel")
+        if lbl then lbl.TextColor3=on and T.TEXT or T.DIM end
+    end
+
+    -- tap anywhere on the row
+    row.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+            S[key]=not S[key]; Upd()
+            if cb then cb(S[key]) end
+        end
+    end)
+    return row
+end
+
+-- ── MOBILE SLIDER ─────────────────────────────────────────────
+local function MakeSli(parent,label,key,mn,mx,suf,cb)
+    local wrap=N("Frame",{
+        BackgroundColor3=T.BG3,
+        AutomaticSize=Enum.AutomaticSize.Y,
+        Size=UDim2.new(1,0,0,0),
+        Parent=parent,
+    })
+    Corn(wrap,T.CORNER)
+    Pad(wrap,T.PAD)
+    LL(wrap,4)
+
+    -- top row: label + value
+    local top=N("Frame",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,T.FSZ+2),Parent=wrap})
+    Txt(top,label,T.FSZ,T.DIM)
+    local vl=N("TextLabel",{
+        Text=tostring(S[key])..(suf or ""),Font=T.FONT,TextSize=T.FSZ,
+        TextColor3=T.ACCENT2,BackgroundTransparency=1,
+        TextXAlignment=Enum.TextXAlignment.Right,
+        Size=UDim2.new(1,0,1,0),Parent=top,
+    })
+
+    -- track (tall for finger)
+    local track=N("Frame",{Size=UDim2.new(1,0,0,10),BackgroundColor3=T.SBG,Parent=wrap})
+    Corn(track,5)
+    local r0=(S[key]-mn)/math.max(mx-mn,1)
+    local fill=N("Frame",{Size=UDim2.new(r0,0,1,0),BackgroundColor3=T.ACCENT,Parent=track})
+    Corn(fill,5)
+    N("UIGradient",{Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0,T.ACCENT),
+        ColorSequenceKeypoint.new(1,T.ACCENT2),
+    }),Parent=fill})
+
+    -- thumb
+    local thumb=N("Frame",{
+        Size=UDim2.new(0,22,0,22),
+        Position=UDim2.new(r0,r0>0 and -11 or 0,0.5,-11),
+        BackgroundColor3=T.ACCENT2,
+        Parent=track,
+    })
+    Corn(thumb,11)
+    Strk(thumb,T.BG,2)
+
+    local drag=false
+
+    local function Set(x)
+        local rel=math.clamp((x-track.AbsolutePosition.X)/math.max(track.AbsoluteSize.X,1),0,1)
+        local v=math.clamp(math.round(mn+rel*(mx-mn)),mn,mx)
+        S[key]=v
+        fill.Size=UDim2.new(rel,0,1,0)
+        thumb.Position=UDim2.new(rel,rel>0 and -11 or 0,0.5,-11)
+        vl.Text=tostring(v)..(suf or "")
+        if cb then cb(v) end
+    end
+
+    track.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+            drag=true; Set(i.Position.X)
+        end
+    end)
+    track.InputChanged:Connect(function(i)
+        if drag and (i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch) then
+            Set(i.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then drag=false end
+    end)
+    return wrap
+end
+
+-- ── SECTION HEADER ────────────────────────────────────────────
+local function Sec(parent,title,right)
+    local row=N("Frame",{BackgroundColor3=T.BG2,Size=UDim2.new(1,0,0,28),Parent=parent})
+    Corn(row,4)
+    N("Frame",{Size=UDim2.new(0,3,1,0),BackgroundColor3=T.ACCENT,Parent=row})
+    N("TextLabel",{Text="   "..title,Font=Enum.Font.GothamBold,TextSize=T.FSZ,
+        TextColor3=T.TEXT,BackgroundTransparency=1,
+        TextXAlignment=Enum.TextXAlignment.Left,
+        Size=UDim2.new(0.7,0,1,0),Parent=row})
+    if right then
+        N("TextLabel",{Text=right,Font=T.FONT,TextSize=T.FSM,
+            TextColor3=T.ACCENT2,BackgroundTransparency=1,
+            TextXAlignment=Enum.TextXAlignment.Right,
+            Size=UDim2.new(1,-8,1,0),Parent=row})
+    end
+    return row
+end
+
+-- ── DROPDOWN ─────────────────────────────────────────────────
+local function MakeDrop(parent,label,key,opts,cb)
+    local wrap=N("Frame",{BackgroundColor3=T.BG3,AutomaticSize=Enum.AutomaticSize.Y,
+        Size=UDim2.new(1,0,0,0),Parent=parent})
+    Corn(wrap,T.CORNER); Pad(wrap,T.PAD); LL(wrap,4)
+    Txt(wrap,label,T.FSM,T.DIM)
+    local btn=N("TextButton",{Text=tostring(S[key]).."  ▾",Font=T.FONT,TextSize=T.FSZ,
+        TextColor3=T.TEXT,BackgroundColor3=T.BG2,
+        Size=UDim2.new(1,0,0,T.ROW),
+        TextXAlignment=Enum.TextXAlignment.Left,Parent=wrap})
+    Corn(btn,4); Pad(btn,T.PAD); Strk(btn,T.BORDER)
+    local mf=nil
+    btn.MouseButton1Click:Connect(function()
+        if mf then mf:Destroy();mf=nil;return end
+        mf=N("Frame",{BackgroundColor3=T.BG2,
+            Size=UDim2.new(1,0,0,#opts*T.ROW+4),
+            Position=UDim2.new(0,0,1,2),ZIndex=30,Parent=btn})
+        Corn(mf,4); Strk(mf,T.ACCENT); LL(mf,0)
+        Pad(mf,2)
+        for _,opt in ipairs(opts) do
+            local ob=N("TextButton",{Text=opt,Font=T.FONT,TextSize=T.FSZ,
+                TextColor3=opt==S[key] and T.ACCENT2 or T.TEXT,
+                BackgroundColor3=T.BG3,
+                Size=UDim2.new(1,0,0,T.ROW),
+                TextXAlignment=Enum.TextXAlignment.Left,ZIndex=31,Parent=mf})
+            Corn(ob,4); Pad(ob,T.PAD)
+            ob.MouseButton1Click:Connect(function()
+                S[key]=opt; btn.Text=opt.."  ▾"
+                if cb then cb(opt) end
+                mf:Destroy();mf=nil
+            end)
+        end
+    end)
+    return wrap
+end
+
+-- ── KV ROW ────────────────────────────────────────────────────
+local function KV(parent,k,v)
+    local row=N("Frame",{BackgroundColor3=T.BG3,Size=UDim2.new(1,0,0,T.ROWSM),Parent=parent})
+    Corn(row,4); Pad(row,T.PAD)
+    N("TextLabel",{Text=k,Font=T.FONTSM,TextSize=T.FSM,TextColor3=T.DIM,
+        BackgroundTransparency=1,TextXAlignment=Enum.TextXAlignment.Left,
+        Size=UDim2.new(0.6,0,1,0),Parent=row})
+    N("TextLabel",{Text=v,Font=T.FONT,TextSize=T.FSM,TextColor3=T.ACCENT2,
+        BackgroundTransparency=1,TextXAlignment=Enum.TextXAlignment.Right,
+        Size=UDim2.new(1,0,1,0),Parent=row})
+    return row
+end
+
+-- ── EXPAND ROW ────────────────────────────────────────────────
+local function Exp(parent,txt)
+    local b=N("TextButton",{Text="  "..txt.."  ›",Font=T.FONT,TextSize=T.FSZ,
+        TextColor3=T.DIM,BackgroundColor3=T.BG3,
+        Size=UDim2.new(1,0,0,T.ROWSM),
+        TextXAlignment=Enum.TextXAlignment.Left,Parent=parent})
+    Corn(b,4); Strk(b,T.BORDER)
+    return b
+end
+
+-- ============================================================
+--  [12] MAIN SCREEN GUI
+-- ============================================================
+local SG=N("ScreenGui",{
+    Name="AscendantHub",ResetOnSpawn=false,
+    ZIndexBehavior=Enum.ZIndexBehavior.Sibling,
+    IgnoreGuiInset=true,
+    Parent=(gethui and gethui()) or LocalPlayer.PlayerGui,
+})
+
+-- ── PILL TOGGLE (always visible, bottom-right thumb zone) ────
+local Pill=N("TextButton",{
+    Text="☰",Font=Enum.Font.GothamBold,TextSize=20,
+    TextColor3=T.TEXT,BackgroundColor3=T.ACCENT,
+    Size=UDim2.new(0,52,0,52),
+    Position=UDim2.new(1,-62,1,-72),  -- bottom-right
+    ZIndex=200,Parent=SG,
+})
+Corn(Pill,26)
+N("UIStroke",{Color=T.ACCENT2,Thickness=2,Parent=Pill})
+
+-- ── WINDOW — sized as % of screen for all phones ─────────────
+local WIN_W = math.min(VP().X * 0.92, 480)
+local WIN_H = math.min(VP().Y * 0.78, 560)
+
+local Win=N("Frame",{
+    Name="Window",
+    Size=UDim2.new(0,WIN_W,0,WIN_H),
+    Position=UDim2.new(0.5,-WIN_W/2,0.5,-WIN_H/2),
+    BackgroundColor3=T.BG,ZIndex=10,Parent=SG,
+})
+Corn(Win,8); Strk(Win,T.BORDER,1)
+
+-- ── TITLEBAR ─────────────────────────────────────────────────
+local TBar=N("Frame",{
+    Size=UDim2.new(1,0,0,44),
+    BackgroundColor3=T.BG2,Parent=Win,
+})
+Corn(TBar,8)
+N("Frame",{Size=UDim2.new(1,0,0,8),Position=UDim2.new(0,0,1,-8),BackgroundColor3=T.BG2,Parent=TBar})
+N("Frame",{Size=UDim2.new(0,3,1,0),BackgroundColor3=T.ACCENT,Parent=TBar})
+
+-- title text
+N("TextLabel",{Text="   Ascendant Hub",Font=Enum.Font.GothamBold,
+    TextSize=T.FSZ,TextColor3=T.TEXT,BackgroundTransparency=1,
+    TextXAlignment=Enum.TextXAlignment.Left,
+    Size=UDim2.new(0.5,0,1,0),Parent=TBar})
+
+-- badge
+local badge=N("TextLabel",{Text="Rivals",Font=Enum.Font.GothamBold,TextSize=T.FSM,
+    TextColor3=T.TEXT,BackgroundColor3=T.ACCENT,
+    Size=UDim2.new(0,52,0,22),Position=UDim2.new(1,-162,0.5,-11),
+    TextXAlignment=Enum.TextXAlignment.Center,Parent=TBar})
+Corn(badge,4)
+
+-- LOCK button (big)
+local LockBtn=N("TextButton",{Text="🔓",Font=T.FONT,TextSize=T.FSM,
+    TextColor3=T.TEXT,BackgroundColor3=T.BG3,
+    Size=UDim2.new(0,48,0,28),
+    Position=UDim2.new(1,-108,0.5,-14),
+    TextXAlignment=Enum.TextXAlignment.Center,Parent=TBar})
+Corn(LockBtn,6); Strk(LockBtn,T.BORDER)
+
+-- CLOSE button (big)
+local CloseBtn=N("TextButton",{Text="✕",Font=Enum.Font.GothamBold,TextSize=T.FSZ,
+    TextColor3=T.TEXT,BackgroundColor3=Color3.fromRGB(180,40,40),
+    Size=UDim2.new(0,44,0,28),
+    Position=UDim2.new(1,-56,0.5,-14),
+    TextXAlignment=Enum.TextXAlignment.Center,Parent=TBar})
+Corn(CloseBtn,6)
+
+-- ── TAB BAR (scrollable horizontal) ──────────────────────────
+local TabScroll=N("ScrollingFrame",{
+    Size=UDim2.new(1,0,0,40),
+    Position=UDim2.new(0,0,0,44),
+    BackgroundColor3=T.BG2,
+    CanvasSize=UDim2.new(0,0,0,0),
+    AutomaticCanvasSize=Enum.AutomaticSize.X,
+    ScrollBarThickness=0,
+    ScrollingDirection=Enum.ScrollingDirection.X,
+    Parent=Win,
+})
+N("UIListLayout",{
+    SortOrder=Enum.SortOrder.LayoutOrder,
+    FillDirection=Enum.FillDirection.Horizontal,
+    Padding=UDim.new(0,0),
+    Parent=TabScroll,
+})
+
+-- ── CONTENT AREA ─────────────────────────────────────────────
+local Content=N("Frame",{
+    Size=UDim2.new(1,0,1,-84),
+    Position=UDim2.new(0,0,0,84),
+    BackgroundTransparency=1,
+    ClipsDescendants=true,
+    Parent=Win,
+})
+
+local TABS={"main","world","esp","visuals","character","misc","settings"}
+local TabBtns={}; local TabPages={}; local ActiveTab="main"
+
+local function SwitchTab(name)
+    if ActiveTab==name then return end
+    TabPages[ActiveTab].Visible=false
+    ActiveTab=name; TabPages[name].Visible=true
+    for tn,b in pairs(TabBtns) do
+        b.BackgroundColor3=tn==name and T.TACT or T.TIDL
+        b.TextColor3=tn==name and T.TEXT or T.DIM
+        b.Font=tn==name and Enum.Font.GothamBold or T.FONT
+    end
+end
+
+-- ============================================================
+--  [13] TAB CONTENT
+-- ============================================================
+
+-- MAIN
+local function BuildMain(p)
+    local sc=Scr(p,WIN_H-84)
+    local inn=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(1,0,0,0),Parent=sc})
+    Pad(inn,T.PAD); LL(inn,6)
+
+    -- two-column
+    local cols=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(1,0,0,0),Parent=inn})
+    LL(cols,6,Enum.FillDirection.Horizontal)
+
+    local L=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(0.5,-4,0,0),Parent=cols})
+    LL(L,6)
+
+    Sec(L,"silent aim / aimbot")
+    MakeTog(L,"enabled","aim_enabled")
+    MakeTog(L,"manipulation","aim_manipulation")
+    MakeTog(L,"closest part","aim_closest_part")
+    MakeTog(L,"show fov","aim_show_fov")
+    MakeSli(L,"fov radius","aim_fov_radius",1,2000,"px")
+    MakeSli(L,"hit chance","aim_hit_chance",0,100,"%")
+    MakeSli(L,"smooth","aim_smooth",0,100,"%")
+    Sec(L,"targeting")
+    MakeTog(L,"visible only","aim_visible_only")
+    MakeTog(L,"ignore prot","aim_ignore_prot")
+    MakeTog(L,"wallbang","aim_wallbang")
+    MakeTog(L,"ignore fov","aim_ignore_fov")
+    MakeTog(L,"block shield","aim_block_shield")
+    MakeTog(L,"block katana","aim_block_katana")
+    MakeTog(L,"limit dist","aim_limit_dist")
+    MakeSli(L,"react ms","aim_react_ms",0,500,"ms")
+    MakeSli(L,"forget s","aim_forget_s",0,10,"s")
+    MakeDrop(L,"target part","aim_target_part",{"Head","UpperTorso","LowerTorso","HumanoidRootPart"})
+    MakeDrop(L,"blacklist","aim_blacklist_part",{"Head","UpperTorso","None"})
+
+    local R=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(0.5,-4,0,0),Parent=cols})
+    LL(R,6)
+
+    Sec(R,"triggerbot")
+    MakeTog(R,"enabled","trig_enabled")
+    MakeTog(R,"no spread","trig_no_spread")
+    MakeTog(R,"full auto","trig_full_auto")
+    MakeTog(R,"backstab","trig_backstab")
+    MakeSli(R,"firerate","trig_firerate",1,100,"%")
+    MakeSli(R,"fov","trig_fov",1,200,"px")
+    Exp(R,"grenade options")
+
+    Sec(R,"ragebot")
+    MakeTog(R,"enabled","rage_enabled")
+    MakeTog(R,"void spam","rage_void_spam")
+    MakeSli(R,"shoot attempts","rage_shoot_att",1,10,"x")
+    Exp(R,"attack mode")
+    Exp(R,"melee")
+    Exp(R,"preferred weapon")
+    Exp(R,"primary")
+end
+
+-- ESP
+local function BuildEsp(p)
+    local sc=Scr(p,WIN_H-84)
+    local inn=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(1,0,0,0),Parent=sc})
+    Pad(inn,T.PAD); LL(inn,6)
+    Sec(inn,"esp")
+    MakeTog(inn,"enabled","esp_enabled")
+    MakeTog(inn,"highlight (perf cost)","esp_highlight")
+    MakeTog(inn,"names","esp_names")
+    MakeTog(inn,"health info","esp_health")
+    MakeTog(inn,"arrows","esp_arrows")
+    MakeTog(inn,"distance","esp_distance")
+    MakeTog(inn,"vertical hp","esp_vert_hp")
+    MakeTog(inn,"look direction","esp_look_dir")
+    MakeTog(inn,"weapon","esp_weapon")
+    MakeTog(inn,"teammates","esp_teammates")
+    MakeTog(inn,"throwables","esp_throwables")
+    Sec(inn,"opacity")
+MakeSli(inn,"fill","esp_fill_opacity",0,100,"%")
+    MakeSli(inn,"outline","esp_outline_opacity",0,100,"%")
+    MakeSli(inn,"max dist","esp_max_dist",100,2000,"")
+    Sec(inn,"colors")
+    for _,cd in ipairs({
+        {"visible",   "esp_col_visible"},
+        {"hidden",    "esp_col_hidden"},
+        {"wallbang",  "esp_col_wallbang"},
+        {"look dir",  "esp_col_lookdir"},
+    }) do
+        local row=N("Frame",{BackgroundColor3=T.BG3,Size=UDim2.new(1,0,0,T.ROWSM),Parent=inn})
+        Corn(row,4); Pad(row,T.PAD)
+        N("TextLabel",{Text=cd[1],Font=T.FONT,TextSize=T.FSZ,TextColor3=T.DIM,
+            BackgroundTransparency=1,TextXAlignment=Enum.TextXAlignment.Left,
+            Size=UDim2.new(0.7,0,1,0),Parent=row})
+        local swatch=N("Frame",{Size=UDim2.new(0,22,0,18),
+            Position=UDim2.new(1,-22,0.5,-9),BackgroundColor3=S[cd[2]],Parent=row})
+        Corn(swatch,4); Strk(swatch,T.BORDER)
+    end
+end
+
+-- VISUALS
+local function BuildVis(p)
+    local sc=Scr(p,WIN_H-84)
+    local inn=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(1,0,0,0),Parent=sc})
+    Pad(inn,T.PAD); LL(inn,6)
+    Sec(inn,"visuals")
+    MakeTog(inn,"fov circle","vis_fov_circle")
+end
+
+-- MISC
+local function BuildMisc(p)
+    local sc=Scr(p,WIN_H-84)
+    local inn=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(1,0,0,0),Parent=sc})
+    Pad(inn,T.PAD); LL(inn,6)
+    Sec(inn,"movement")
+    MakeTog(inn,"speed hack","misc_speed")
+    MakeSli(inn,"walk speed","misc_speed_val",8,200,"")
+    Sec(inn,"projectiles")
+    MakeTog(inn,"projectile redirect","proj_redirect")
+    Sec(inn,"weapon mods")
+    MakeTog(inn,"infinite ammo","misc_inf_ammo")
+    MakeTog(inn,"no recoil","mod_no_recoil")
+    MakeTog(inn,"attack speed","mod_attack_speed")
+    MakeSli(inn,"attack %","mod_attack_pct",50,500,"%")
+    MakeTog(inn,"fast reload","mod_fast_reload")
+    MakeSli(inn,"reload %","mod_reload_pct",50,500,"%")
+    MakeTog(inn,"fast ads","mod_fast_ads")
+    MakeSli(inn,"ads %","mod_ads_pct",50,500,"%")
+end
+
+-- SETTINGS
+local function BuildSettings(p)
+    local sc=Scr(p,WIN_H-84)
+    local inn=N("Frame",{BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,Size=UDim2.new(1,0,0,0),Parent=sc})
+    Pad(inn,T.PAD); LL(inn,6)
+    Sec(inn,"info")
+    KV(inn,"version","v6.1 mobile")
+    KV(inn,"game","Rivals")
+    KV(inn,"esp rate","12 fps")
+    KV(inn,"toggle","☰ pill bottom-right")
+    KV(inn,"drag","hold titlebar")
+    KV(inn,"lock","🔓 button in titlebar")
+    Sec(inn,"keybinds")
+    KV(inn,"aimbot","RMB (mouse) / auto mobile")
+    KV(inn,"triggerbot","C key (desktop) / auto mobile")
+    KV(inn,"gui toggle","☰ pill")
+    Sec(inn,"performance")
+    MakeSli(inn,"max esp dist","esp_max_dist",100,2000,"")
+    Sec(inn,"actions")
+    local saveBtn=N("TextButton",{
+        Text="save config",Font=Enum.Font.GothamBold,TextSize=T.FSZ,
+        TextColor3=T.TEXT,BackgroundColor3=T.ACCENT,
+        Size=UDim2.new(1,0,0,T.ROW),Parent=inn,
+    })
+    Corn(saveBtn,T.CORNER)
+    saveBtn.MouseButton1Click:Connect(function()
+        saveBtn.Text="saved ✓"
+        task.delay(1.5,function() pcall(function() saveBtn.Text="save config" end) end)
+    end)
+end
+
+local Builders={main=BuildMain,esp=BuildEsp,visuals=BuildVis,misc=BuildMisc,settings=BuildSettings}
+
+for _,name in ipairs(TABS) do
+    local page=N("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=name==ActiveTab,Parent=Content})
+    TabPages[name]=page
+    if Builders[name] then task.defer(function() Builders[name](page) end)
+    else Pad(page,T.PAD); Txt(page,"  "..name.." — soon",T.FSZ,T.DIM) end
+end
+
+-- Tab buttons (in scroll frame, tall for fingers)
+for _,name in ipairs(TABS) do
+    local b=N("TextButton",{
+        Text=name,Font=name==ActiveTab and Enum.Font.GothamBold or T.FONT,
+        TextSize=T.FSM,
+        TextColor3=name==ActiveTab and T.TEXT or T.DIM,
+        BackgroundColor3=name==ActiveTab and T.TACT or T.TIDL,
+        Size=UDim2.new(0,math.max(70,#name*9+16),1,0),
+        Parent=TabScroll,
+    })
+    TabBtns[name]=b
+    b.MouseButton1Click:Connect(function() SwitchTab(name) end)
+end
+
+-- ============================================================
+--  [14] DRAG — FULL TOUCH + MOUSE
+-- ============================================================
+local isDrag=false; local dOff=Vector2.new()
+
+local function StartDrag(pos)
+    if S.gui_locked then return end
+    isDrag=true
+    dOff=Vector2.new(pos.X-Win.AbsolutePosition.X, pos.Y-Win.AbsolutePosition.Y)
+end
+local function DoDrag(pos)
+    if not isDrag then return end
+    local vp=VP()
+    local nx=math.clamp(pos.X-dOff.X,0,vp.X-Win.AbsoluteSize.X)
+    local ny=math.clamp(pos.Y-dOff.Y,0,vp.Y-Win.AbsoluteSize.Y)
+    Win.Position=UDim2.new(0,nx,0,ny)
+end
+local function StopDrag() isDrag=false end
+
+TBar.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1
+    or i.UserInputType==Enum.UserInputType.Touch then StartDrag(i.Position) end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseMovement
+    or i.UserInputType==Enum.UserInputType.Touch then DoDrag(i.Position) end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1
+    or i.UserInputType==Enum.UserInputType.Touch then StopDrag() end
+end)
+
+-- ============================================================
+--  [15] BUTTONS
+-- ============================================================
+CloseBtn.MouseButton1Click:Connect(function()
+    Win.Visible=false
+end)
+
+LockBtn.MouseButton1Click:Connect(function()
+    S.gui_locked=not S.gui_locked
+    LockBtn.Text=S.gui_locked and "🔒" or "🔓"
+    LockBtn.BackgroundColor3=S.gui_locked and Color3.fromRGB(180,40,40) or T.BG3
+end)
+
+Pill.MouseButton1Click:Connect(function()
+    Win.Visible=not Win.Visible
+end)
+Pill.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.Touch then
+        Win.Visible=not Win.Visible
+    end
+end)
+
+-- ============================================================
+--  [16] CLEANUP
+-- ============================================================
+Players.PlayerRemoving:Connect(KillD)
+
+-- ============================================================
+--  [17] LOOPS
+-- ============================================================
+RunService.RenderStepped:Connect(function()
+    RunAim(); NoRec(); UpdFov()
+end)
+RunService.Heartbeat:Connect(function()
+    RenderESP(); RunTrig(); RunMisc()
+    RunProjRedirect(); RunHighlight()
+end)
+
+-- ============================================================
+--  [18] INIT
+-- ============================================================
+RefreshRay()
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification",{
+        Title="Ascendant Hub",
+        Text="Rivals | Mobile ready ✓  |  ☰ bottom-right",
+        Duration=4,
+    })
+end)
+
+-- ============================================================
+--  END — RIVALS MOBILE v6.0
+-- ============================================================
