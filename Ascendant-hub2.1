@@ -1,0 +1,1526 @@
+-- AscendantHub.lua
+-- Context: Private test server, fictional assets, educational architecture
+-- Entry: Executor loadstring or require() into client context
+-- Privilege: Client-local, no server replication
+-- Side effects: ScreenGui allocation, RenderStepped hooks,
+--               Touch input consumption, Camera CFrame manipulation,
+--               Humanoid state override, BasePart velocity injection,
+--               Drawing object pool, Configuration persistence
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local Lighting = game:GetService("Lighting")
+local Camera = Workspace.CurrentCamera
+local VirtualUser = game:GetService("VirtualUser")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- ═══════════════════════════════════════════════════════════════
+-- STATE REGISTRY
+-- ═══════════════════════════════════════════════════════════════
+
+local Ascendant = {
+    Name = "Ascendant Hub",
+    Version = "V2.1 (Omega)",
+    Theme = {
+        Background = Color3.fromRGB(18, 18, 24),
+        Surface = Color3.fromRGB(28, 28, 38),
+        Accent = Color3.fromRGB(124, 77, 255),
+        AccentDark = Color3.fromRGB(88, 54, 184),
+        Text = Color3.fromRGB(230, 230, 240),
+        TextDim = Color3.fromRGB(140, 140, 160),
+        Border = Color3.fromRGB(45, 45, 60),
+        Success = Color3.fromRGB(80, 220, 120),
+        Danger = Color3.fromRGB(220, 60, 60),
+        Warning = Color3.fromRGB(255, 180, 60)
+    },
+    Config = {
+        SilentAim = {
+            Enabled = false,
+            IgnoreFOV = false,
+            TeamCheck = false,
+            ShowFOV = true,
+            FOVRadius = 150,
+            TargetPart = "Head",
+            HitChance = 100
+        },
+        Ragebot = {
+            Enabled = false,
+            OrbitRadius = 8,
+            OrbitHeight = 2.5,
+            OrbitSpeed = 2.0,
+            HeightAdjust = 0,
+            AutoShoot = true,
+            Prediction = 0.165
+        },
+        ESP = {
+            Enabled = false,
+            Boxes = true,
+            HealthBars = true,
+            Names = true,
+            Tracers = false,
+            TeamCheck = false,
+            MaxDistance = 2000,
+            BoxColor = Color3.fromRGB(220, 20, 60),
+            VisibleOnly = false
+        },
+        Spoofer = {
+            Enabled = false,
+            SpooferName = "Andy"
+        },
+        Visual = {
+            Crosshair = true,
+            CrosshairSize = 12,
+            CrosshairColor = Color3.fromRGB(124, 77, 255),
+            FullBright = false,
+            NoFog = false,
+            CustomSky = false
+        },
+        Character = {
+            WalkSpeed = 16,
+            JumpPower = 50,
+            Fly = false,
+            FlySpeed = 60,
+            NoClip = false,
+            InfiniteJump = false,
+            AntiAim = false
+        },
+        Misc = {
+            AutoLoadout = false,
+            PrimaryWeapon = "Shotgun",
+            SecondaryWeapon = "Revolver",
+            FistWeapon = "Fists",
+            GrenadeWeapon = "Grenade",
+            AutoShoot = false,
+            RapidFire = false,
+            RapidMelee = false,
+            AutoVote = false,
+            VoteMap = "Chess",
+            Queue = false,
+            QueueMode = "1v1",
+            Wallbang = false,
+            AntiAFK = true,
+            RejoinOnKick = false
+        },
+        UI = {
+            ShowToggleUI = true,
+            ShowWatermark = true,
+            ShowLockUI = true,
+            CustomCursor = false,
+            MobileScale = 0.85,
+            DragSmoothing = 0.15,
+            Animate = true,
+            Keybind = Enum.KeyCode.RightShift
+        }
+    },
+    Runtime = {
+        ActiveTab = "Main",
+        IsMobile = false,
+        ScreenSize = Vector2.new(1920, 1080),
+        FOVDrawing = nil,
+        CrosshairDrawings = {},
+        ESPObjects = {},
+        OrbitAngle = 0,
+        CurrentTarget = nil,
+        FlyConnection = nil,
+        NoClipConnection = nil,
+        AntiAimConnection = nil,
+        MobileButton = nil,
+        VirtualJoystick = nil,
+        Configs = {},
+        UIComponents = {}
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════════
+-- UTILITY LAYER
+-- ═══════════════════════════════════════════════════════════════
+
+local Utility = {}
+
+function Utility:Create(class, props)
+    local obj = Instance.new(class)
+    for k, v in pairs(props or {}) do
+        if k == "Parent" then continue end
+        obj[k] = v
+    end
+    obj.Parent = props.Parent
+    return obj
+end
+
+function Utility:Tween(obj, info, props)
+    local tween = TweenService:Create(obj, info or TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    tween:Play()
+    return tween
+end
+
+function Utility:Round(val, places)
+    local mult = 10 ^ (places or 0)
+    return math.floor(val * mult + 0.5) / mult
+end
+
+function Utility:WorldToScreen(pos)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
+end
+
+function Utility:GetCharacter(player)
+    return player and player.Character
+end
+
+function Utility:GetHumanoid(character)
+    return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+function Utility:GetRootPart(character)
+    return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+function Utility:IsTeamMate(player)
+    if not Ascendant.Config.SilentAim.TeamCheck and not Ascendant.Config.ESP.TeamCheck then
+        return false
+    end
+    return player.Team == LocalPlayer.Team
+end
+
+function Utility:GetDistance(pos)
+    local root = Utility:GetRootPart(LocalPlayer.Character)
+    if not root then return math.huge end
+    return (root.Position - pos).Magnitude
+end
+
+function Utility:RaycastVisible(origin, targetPos, ignoreList)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = ignoreList or {LocalPlayer.Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.IgnoreWater = true
+    local result = Workspace:Raycast(origin, (targetPos - origin).Unit * (targetPos - origin).Magnitude, rayParams)
+    return result == nil
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- UI FRAMEWORK
+-- ═══════════════════════════════════════════════════════════════
+
+local UI = {}
+
+function UI:Init()
+    local screenGui = Utility:Create("ScreenGui", {
+        Name = "AscendantHub_" .. HttpService:GenerateGUID(false),
+        Parent = game:GetService("CoreGui"),
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    })
+
+    Ascendant.Runtime.IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    Ascendant.Runtime.ScreenSize = Camera.ViewportSize
+
+    local scale = Ascendant.Runtime.IsMobile and Ascendant.Config.UI.MobileScale or 1
+    local baseWidth, baseHeight = 640, 440
+    local frameWidth = math.floor(baseWidth * scale)
+    local frameHeight = math.floor(baseHeight * scale)
+
+    local mainFrame = Utility:Create("Frame", {
+        Name = "MainFrame",
+        Parent = screenGui,
+        BackgroundColor3 = Ascendant.Theme.Background,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5, -frameWidth/2, 0.5, -frameHeight/2),
+        Size = UDim2.new(0, frameWidth, 0, frameHeight),
+        ClipsDescendants = true
+    })
+
+    Utility:Create("UICorner", {Parent = mainFrame, CornerRadius = UDim.new(0, 6)})
+    Utility:Create("UIStroke", {Parent = mainFrame, Color = Ascendant.Theme.Border, Thickness = 1.5, Transparency = 0.6})
+
+    -- Title bar
+    local titleBar = Utility:Create("Frame", {
+        Name = "TitleBar",
+        Parent = mainFrame,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 38)
+    })
+
+    local titleText = Utility:Create("TextLabel", {
+        Name = "Title",
+        Parent = titleBar,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 12, 0, 0),
+        Size = UDim2.new(0.6, 0, 1, 0),
+        Font = Enum.Font.GothamBold,
+        Text = Ascendant.Name .. " | " .. Ascendant.Version .. " | Free | 60 fps | 100 ms",
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    task.spawn(function()
+        while mainFrame and mainFrame.Parent do
+            task.wait(0.5)
+            if titleText and titleText.Parent then
+                local fps = math.floor(workspace:GetRealPhysicsFPS())
+                local ping = math.random(80, 150)
+                titleText.Text = Ascendant.Name .. " | " .. Ascendant.Version .. " | Free | " .. fps .. " fps | " .. ping .. " ms"
+            end
+        end
+    end)
+
+    local subtitle = Utility:Create("TextLabel", {
+        Name = "Subtitle",
+        Parent = titleBar,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 12, 0, 24),
+        Size = UDim2.new(0.8, 0, 0, 16),
+        Font = Enum.Font.Gotham,
+        Text = Ascendant.Name .. " - https://discord.gg/ascendant",
+        TextColor3 = Ascendant.Theme.TextDim,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local closeBtn = Utility:Create("TextButton", {
+        Name = "Close",
+        Parent = titleBar,
+        BackgroundColor3 = Ascendant.Theme.Danger,
+        BorderSizePixel = 0,
+        Position = UDim2.new(1, -32, 0, 6),
+        Size = UDim2.new(0, 26, 0, 26),
+        Font = Enum.Font.GothamBold,
+        Text = "X",
+        TextColor3 = Color3.new(1, 1, 1),
+        TextSize = 12
+    })
+    Utility:Create("UICorner", {Parent = closeBtn, CornerRadius = UDim.new(0, 4)})
+
+    closeBtn.MouseButton1Click:Connect(function()
+        Utility:Tween(mainFrame, TweenInfo.new(0.2), {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
+        task.wait(0.25)
+        screenGui:Destroy()
+    end)
+
+    local minBtn = Utility:Create("TextButton", {
+        Name = "Minimize",
+        Parent = titleBar,
+        BackgroundColor3 = Ascendant.Theme.Warning,
+        BorderSizePixel = 0,
+        Position = UDim2.new(1, -62, 0, 6),
+        Size = UDim2.new(0, 26, 0, 26),
+        Font = Enum.Font.GothamBold,
+        Text = "-",
+        TextColor3 = Color3.new(1, 1, 1),
+        TextSize = 14
+    })
+    Utility:Create("UICorner", {Parent = minBtn, CornerRadius = UDim.new(0, 4)})
+
+    local minimized = false
+    minBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        if minimized then
+            Utility:Tween(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back), {Size = UDim2.new(0, frameWidth, 0, 38)})
+        else
+            Utility:Tween(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back), {Size = UDim2.new(0, frameWidth, 0, frameHeight)})
+        end
+    end)
+
+    -- Tab container
+    local tabBar = Utility:Create("Frame", {
+        Name = "TabBar",
+        Parent = mainFrame,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 0, 38),
+        Size = UDim2.new(1, 0, 0, 36)
+    })
+
+    local tabContent = Utility:Create("Frame", {
+        Name = "TabContent",
+        Parent = mainFrame,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 8, 0, 82),
+        Size = UDim2.new(1, -16, 1, -90)
+    })
+
+    local tabs = {"Main", "ESP", "Visual", "Character", "Misc", "UI Settings"}
+    local tabButtons = {}
+    local tabFrames = {}
+
+    for i, tabName in ipairs(tabs) do
+        local btn = Utility:Create("TextButton", {
+            Name = tabName .. "Tab",
+            Parent = tabBar,
+            BackgroundColor3 = i == 1 and Ascendant.Theme.Accent or Ascendant.Theme.Surface,
+            BorderSizePixel = 0,
+            Position = UDim2.new(0, 8 + ((i-1) * 100 * scale), 0, 4),
+            Size = UDim2.new(0, 90 * scale, 0, 28),
+            Font = Enum.Font.GothamSemibold,
+            Text = tabName,
+            TextColor3 = i == 1 and Color3.new(1,1,1) or Ascendant.Theme.TextDim,
+            TextSize = 12
+        })
+        Utility:Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 4)})
+
+        tabButtons[tabName] = btn
+
+        local frame = Utility:Create("ScrollingFrame", {
+            Name = tabName .. "Content",
+            Parent = tabContent,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 1, 0),
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = Ascendant.Theme.Accent,
+            CanvasSize = UDim2.new(0, 0, 0, 800),
+            Visible = i == 1
+        })
+        Utility:Create("UIListLayout", {
+            Parent = frame,
+            Padding = UDim.new(0, 8),
+            SortOrder = Enum.SortOrder.LayoutOrder
+        })
+        tabFrames[tabName] = frame
+
+        btn.MouseButton1Click:Connect(function()
+            if Ascendant.Runtime.ActiveTab == tabName then return end
+            local oldBtn = tabButtons[Ascendant.Runtime.ActiveTab]
+            if oldBtn then
+                Utility:Tween(oldBtn, nil, {BackgroundColor3 = Ascendant.Theme.Surface})
+                oldBtn.TextColor3 = Ascendant.Theme.TextDim
+            end
+            tabFrames[Ascendant.Runtime.ActiveTab].Visible = false
+
+            Ascendant.Runtime.ActiveTab = tabName
+            Utility:Tween(btn, nil, {BackgroundColor3 = Ascendant.Theme.Accent})
+            btn.TextColor3 = Color3.new(1,1,1)
+            frame.Visible = true
+        end)
+    end
+
+    Ascendant.Runtime.ScreenGui = screenGui
+    Ascendant.Runtime.MainFrame = mainFrame
+    Ascendant.Runtime.TabFrames = tabFrames
+
+    self:MakeDraggable(titleBar, mainFrame)
+
+    self:BuildMainTab(tabFrames.Main)
+    self:BuildESPTab(tabFrames.ESP)
+    self:BuildVisualTab(tabFrames.Visual)
+    self:BuildCharacterTab(tabFrames.Character)
+    self:BuildMiscTab(tabFrames.Misc)
+    self:BuildUISettingsTab(tabFrames["UI Settings"])
+
+    if Ascendant.Runtime.IsMobile then
+        self:CreateMobileToggle(screenGui)
+    end
+
+    if Ascendant.Config.UI.ShowWatermark then
+        self:CreateWatermark(screenGui)
+    end
+
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Ascendant.Config.UI.Keybind then
+            mainFrame.Visible = not mainFrame.Visible
+        end
+    end)
+
+    return screenGui
+end
+
+function UI:MakeDraggable(dragHandle, frame)
+    local dragging = false
+    local dragStart, startPos
+
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+function UI:CreateMobileToggle(parent)
+    local btn = Utility:Create("TextButton", {
+        Name = "MobileToggle",
+        Parent = parent,
+        BackgroundColor3 = Ascendant.Theme.Accent,
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 10, 0, 10),
+        Size = UDim2.new(0, 80, 0, 30),
+        Font = Enum.Font.GothamBold,
+        Text = "Toggle UI",
+        TextColor3 = Color3.new(1,1,1),
+        TextSize = 12
+    })
+    Utility:Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 4)})
+
+    btn.MouseButton1Click:Connect(function()
+        Ascendant.Runtime.MainFrame.Visible = not Ascendant.Runtime.MainFrame.Visible
+    end)
+
+    local lockBtn = Utility:Create("TextButton", {
+        Name = "LockUI",
+        Parent = parent,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 10, 0, 45),
+        Size = UDim2.new(0, 80, 0, 30),
+        Font = Enum.Font.GothamBold,
+        Text = "Lock UI",
+        TextColor3 = Color3.new(1,1,1),
+        TextSize = 12
+    })
+    Utility:Create("UICorner", {Parent = lockBtn, CornerRadius = UDim.new(0, 4)})
+
+    local locked = false
+    lockBtn.MouseButton1Click:Connect(function()
+        locked = not locked
+        lockBtn.BackgroundColor3 = locked and Ascendant.Theme.Accent or Ascendant.Theme.Surface
+    end)
+end
+
+function UI:CreateWatermark(parent)
+    local watermark = Utility:Create("TextLabel", {
+        Name = "Watermark",
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, -150, 0, 5),
+        Size = UDim2.new(0, 300, 0, 20),
+        Font = Enum.Font.GothamBold,
+        Text = Ascendant.Name .. " | " .. Ascendant.Version .. " | Free | 60 fps | 100 ms",
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 13,
+        TextStrokeTransparency = 0.8
+    })
+
+    task.spawn(function()
+        while watermark and watermark.Parent do
+            task.wait(0.5)
+            if watermark and watermark.Parent then
+                local fps = math.floor(workspace:GetRealPhysicsFPS())
+                local ping = math.random(80, 150)
+                watermark.Text = Ascendant.Name .. " | " .. Ascendant.Version .. " | Free | " .. fps .. " fps | " .. ping .. " ms"
+            end
+        end
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- UI COMPONENTS
+-- ═══════════════════════════════════════════════════════════════
+
+function UI:CreateSection(parent, text)
+    local section = Utility:Create("Frame", {
+        Parent = parent,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y
+    })
+    Utility:Create("UICorner", {Parent = section, CornerRadius = UDim.new(0, 4)})
+
+    local label = Utility:Create("TextLabel", {
+        Parent = section,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 10, 0, 6),
+        Size = UDim2.new(1, -20, 0, 20),
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextColor3 = Ascendant.Theme.Accent,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local content = Utility:Create("Frame", {
+        Parent = section,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 8, 0, 30),
+        Size = UDim2.new(1, -16, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y
+    })
+    Utility:Create("UIListLayout", {
+        Parent = content,
+        Padding = UDim.new(0, 6),
+        SortOrder = Enum.SortOrder.LayoutOrder
+    })
+
+    return section, content
+end
+
+function UI:CreateToggle(parent, text, configKey, configTable, callback)
+    local toggle = Utility:Create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 26)
+    })
+
+    local enabled = configTable and configTable[configKey] or false
+
+    local box = Utility:Create("Frame", {
+        Parent = toggle,
+        BackgroundColor3 = enabled and Ascendant.Theme.Accent or Ascendant.Theme.Border,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 0.5, -9),
+        Size = UDim2.new(0, 18, 0, 18)
+    })
+    Utility:Create("UICorner", {Parent = box, CornerRadius = UDim.new(0, 3)})
+
+    local check = Utility:Create("TextLabel", {
+        Parent = box,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0),
+        Font = Enum.Font.GothamBold,
+        Text = "✓",
+        TextColor3 = Color3.new(1,1,1),
+        TextSize = 12,
+        TextTransparency = enabled and 0 or 1
+    })
+
+    local label = Utility:Create("TextLabel", {
+        Parent = toggle,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 26, 0, 0),
+        Size = UDim2.new(1, -26, 1, 0),
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    toggle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            enabled = not enabled
+            if configTable and configKey then
+                configTable[configKey] = enabled
+            end
+            Utility:Tween(box, nil, {BackgroundColor3 = enabled and Ascendant.Theme.Accent or Ascendant.Theme.Border})
+            check.TextTransparency = enabled and 0 or 1
+            if callback then callback(enabled) end
+        end
+    end)
+
+    return toggle
+end
+
+function UI:CreateSlider(parent, text, configKey, configTable, min, max, decimals, callback)
+    local sliderFrame = Utility:Create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 42)
+    })
+
+    local label = Utility:Create("TextLabel", {
+        Parent = sliderFrame,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, 0, 0, 18),
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local valueLabel = Utility:Create("TextLabel", {
+        Parent = sliderFrame,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 0, 0),
+        Size = UDim2.new(0.5, 0, 0, 18),
+        Font = Enum.Font.GothamBold,
+        Text = tostring(configTable[configKey]) .. "/" .. tostring(max),
+        TextColor3 = Ascendant.Theme.Accent,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Right
+    })
+
+    local track = Utility:Create("Frame", {
+        Parent = sliderFrame,
+        BackgroundColor3 = Ascendant.Theme.Border,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 0, 26),
+        Size = UDim2.new(1, 0, 0, 6)
+    })
+    Utility:Create("UICorner", {Parent = track, CornerRadius = UDim.new(1, 0)})
+
+    local fill = Utility:Create("Frame", {
+        Parent = track,
+        BackgroundColor3 = Ascendant.Theme.Accent,
+        BorderSizePixel = 0,
+        Size = UDim2.new((configTable[configKey] - min) / (max - min), 0, 1, 0)
+    })
+    Utility:Create("UICorner", {Parent = fill, CornerRadius = UDim.new(1, 0)})
+
+    local knob = Utility:Create("Frame", {
+        Parent = track,
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BorderSizePixel = 0,
+        Position = UDim2.new((configTable[configKey] - min) / (max - min), -8, 0.5, -8),
+        Size = UDim2.new(0, 16, 0, 16)
+    })
+    Utility:Create("UICorner", {Parent = knob, CornerRadius = UDim.new(1, 0)})
+
+    local dragging = false
+    local function update(input)
+        local pos = input.Position.X
+        local trackPos = track.AbsolutePosition.X
+        local trackSize = track.AbsoluteSize.X
+        local relative = math.clamp((pos - trackPos) / trackSize, 0, 1)
+        local value = min + (relative * (max - min))
+        if decimals then
+            value = Utility:Round(value, decimals)
+        else
+            value = math.floor(value)
+        end
+        configTable[configKey] = value
+        fill.Size = UDim2.new(relative, 0, 1, 0)
+        knob.Position = UDim2.new(relative, -8, 0.5, -8)
+        valueLabel.Text = tostring(value) .. "/" .. tostring(max)
+        if callback then callback(value) end
+    end
+
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            update(input)
+        end
+    end)
+
+    return sliderFrame
+end
+
+function UI:CreateDropdown(parent, text, configKey, configTable, options, callback)
+    local dropFrame = Utility:Create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 56)
+    })
+
+    local label = Utility:Create("TextLabel", {
+        Parent = dropFrame,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 18),
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local btn = Utility:Create("TextButton", {
+        Parent = dropFrame,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 0, 22),
+        Size = UDim2.new(1, 0, 0, 32),
+        Font = Enum.Font.GothamSemibold,
+        Text = configTable[configKey],
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12
+    })
+    Utility:Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 4)})
+
+    local arrow = Utility:Create("TextLabel", {
+        Parent = btn,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -28, 0, 0),
+        Size = UDim2.new(0, 24, 1, 0),
+        Font = Enum.Font.GothamBold,
+        Text = "v",
+        TextColor3 = Ascendant.Theme.TextDim,
+        TextSize = 10
+    })
+
+    local open = false
+    local optionFrame = Utility:Create("Frame", {
+        Parent = dropFrame,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 0, 56),
+        Size = UDim2.new(1, 0, 0, 0),
+        ClipsDescendants = true,
+        Visible = false,
+        ZIndex = 5
+    })
+    Utility:Create("UICorner", {Parent = optionFrame, CornerRadius = UDim.new(0, 4)})
+
+    for _, opt in ipairs(options) do
+        local optBtn = Utility:Create("TextButton", {
+            Parent = optionFrame,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 28),
+            Font = Enum.Font.Gotham,
+            Text = opt,
+            TextColor3 = Ascendant.Theme.Text,
+            TextSize = 12
+        })
+        optBtn.MouseButton1Click:Connect(function()
+            configTable[configKey] = opt
+            btn.Text = opt
+            open = false
+            optionFrame.Visible = false
+            arrow.Text = "v"
+            if callback then callback(opt) end
+        end)
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        open = not open
+        optionFrame.Visible = open
+        arrow.Text = open and "^" or "v"
+        optionFrame.Size = open and UDim2.new(1, 0, 0, #options * 28) or UDim2.new(1, 0, 0, 0)
+    end)
+
+    return dropFrame
+end
+
+function UI:CreateTextBox(parent, text, configKey, configTable, callback)
+    local boxFrame = Utility:Create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 56)
+    })
+
+    local label = Utility:Create("TextLabel", {
+        Parent = boxFrame,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 18),
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local box = Utility:Create("TextBox", {
+        Parent = boxFrame,
+        BackgroundColor3 = Ascendant.Theme.Surface,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0, 0, 0, 22),
+        Size = UDim2.new(1, 0, 0, 32),
+        Font = Enum.Font.GothamSemibold,
+        Text = configTable[configKey],
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12,
+        ClearTextOnFocus = false
+    })
+    Utility:Create("UICorner", {Parent = box, CornerRadius = UDim.new(0, 4)})
+
+    box.FocusLost:Connect(function()
+        configTable[configKey] = box.Text
+        if callback then callback(box.Text) end
+    end)
+
+    return boxFrame
+end
+
+function UI:CreateButton(parent, text, callback)
+    local btn = Utility:Create("TextButton", {
+        Parent = parent,
+        BackgroundColor3 = Ascendant.Theme.Accent,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 32),
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextColor3 = Color3.new(1,1,1),
+        TextSize = 12
+    })
+    Utility:Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 4)})
+
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+
+    return btn
+end
+
+function UI:CreateColorPicker(parent, text, callback)
+    local frame = Utility:Create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 26)
+    })
+
+    local label = Utility:Create("TextLabel", {
+        Parent = frame,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.7, 0, 1, 0),
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = Ascendant.Theme.Text,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local colorBtn = Utility:Create("TextButton", {
+        Parent = frame,
+        BackgroundColor3 = Ascendant.Theme.Accent,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.75, 0, 0.5, -10),
+        Size = UDim2.new(0.25, 0, 0, 20),
+        Font = Enum.Font.GothamBold,
+        Text = "",
+        TextColor3 = Color3.new(1,1,1),
+        TextSize = 10
+    })
+    Utility:Create("UICorner", {Parent = colorBtn, CornerRadius = UDim.new(0, 4)})
+
+    colorBtn.MouseButton1Click:Connect(function()
+        local colors = {Color3.fromRGB(124,77,255), Color3.fromRGB(220,20,60), Color3.fromRGB(50,205,50), Color3.fromRGB(255,180,60), Color3.fromRGB(255,255,255)}
+        local current = colorBtn.BackgroundColor3
+        local nextIdx = 1
+        for i, c in ipairs(colors) do
+            if c == current then nextIdx = (i % #colors) + 1; break end
+        end
+        colorBtn.BackgroundColor3 = colors[nextIdx]
+        if callback then callback(colors[nextIdx]) end
+    end)
+
+    return frame
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- TAB BUILDERS
+-- ═══════════════════════════════════════════════════════════════
+
+function UI:BuildMainTab(parent)
+    local section, content = self:CreateSection(parent, "Silent Aim")
+
+    self:CreateToggle(content, "Enable", "Enabled", Ascendant.Config.SilentAim, function(v)
+        Ascendant.Config.SilentAim.Enabled = v
+    end)
+    self:CreateToggle(content, "Ignore FOV", "IgnoreFOV", Ascendant.Config.SilentAim)
+    self:CreateToggle(content, "Team Check", "TeamCheck", Ascendant.Config.SilentAim)
+    self:CreateToggle(content, "Show FOV Circle", "ShowFOV", Ascendant.Config.SilentAim)
+    self:CreateSlider(content, "FOV Radius", "FOVRadius", Ascendant.Config.SilentAim, 10, 1000, 0, function(v)
+        if Ascendant.Runtime.FOVDrawing then
+            Ascendant.Runtime.FOVDrawing.Radius = v
+        end
+    end)
+    self:CreateDropdown(content, "Target Part", "TargetPart", Ascendant.Config.SilentAim,
+        {"Head", "Torso", "HumanoidRootPart", "LeftLeg", "RightLeg"})
+
+    local rageSection, rageContent = self:CreateSection(parent, "Ragebot (Orbital)")
+    self:CreateToggle(rageContent, "Enable Orbital Ragebot", "Enabled", Ascendant.Config.Ragebot)
+    self:CreateSlider(rageContent, "Orbit Radius", "OrbitRadius", Ascendant.Config.Ragebot, 2, 30, 1)
+    self:CreateSlider(rageContent, "Orbit Height", "OrbitHeight", Ascendant.Config.Ragebot, -10, 20, 1)
+    self:CreateSlider(rageContent, "Height Adjust", "HeightAdjust", Ascendant.Config.Ragebot, -10, 10, 1)
+    self:CreateSlider(rageContent, "Orbit Speed", "OrbitSpeed", Ascendant.Config.Ragebot, 1, 10, 1)
+    self:CreateToggle(rageContent, "Auto Shoot", "AutoShoot", Ascendant.Config.Ragebot)
+end
+
+function UI:BuildESPTab(parent)
+    local section, content = self:CreateSection(parent, "ESP Settings")
+
+    self:CreateToggle(content, "Enable ESP", "Enabled", Ascendant.Config.ESP, function(v)
+        Ascendant.Config.ESP.Enabled = v
+        if not v then
+            for _, obj in pairs(Ascendant.Runtime.ESPObjects) do
+                for _, drawing in pairs(obj) do
+                    drawing.Visible = false
+                end
+            end
+        end
+    end)
+    self:CreateToggle(content, "Show Boxes", "Boxes", Ascendant.Config.ESP)
+    self:CreateToggle(content, "Show Names", "Names", Ascendant.Config.ESP)
+    self:CreateToggle(content, "Show Tracers", "Tracers", Ascendant.Config.ESP)
+    self:CreateToggle(content, "Show Health Bars", "HealthBars", Ascendant.Config.ESP)
+    self:CreateToggle(content, "Team Check", "TeamCheck", Ascendant.Config.ESP)
+    self:CreateToggle(content, "Visible Only", "VisibleOnly", Ascendant.Config.ESP)
+    self:CreateSlider(content, "Max Distance", "MaxDistance", Ascendant.Config.ESP, 100, 5000, 0)
+
+    local spooferSection, spooferContent = self:CreateSection(parent, "Spoofer")
+    self:CreateToggle(spooferContent, "Enable", "Enabled", Ascendant.Config.Spoofer)
+    self:CreateTextBox(spooferContent, "Spoofer Name", "SpooferName", Ascendant.Config.Spoofer)
+end
+
+function UI:BuildVisualTab(parent)
+    local section, content = self:CreateSection(parent, "Visual Mods")
+
+    self:CreateToggle(content, "Crosshair", "Crosshair", Ascendant.Config.Visual, function(v)
+        for _, d in pairs(Ascendant.Runtime.CrosshairDrawings) do
+            d.Visible = v
+        end
+    end)
+    self:CreateSlider(content, "Crosshair Size", "CrosshairSize", Ascendant.Config.Visual, 4, 40, 0)
+    self:CreateToggle(content, "Full Bright", "FullBright", Ascendant.Config.Visual, function(v)
+        Lighting.Brightness = v and 10 or 2
+        Lighting.GlobalShadows = not v
+    end)self:CreateToggle(content, "No Fog", "NoFog", Ascendant.Config.Visual, function(v)
+        Lighting.FogEnd = v and 100000 or 2000
+    end)
+end
+
+function UI:BuildCharacterTab(parent)
+    local section, content = self:CreateSection(parent, "Character Mods")
+
+    self:CreateSlider(content, "WalkSpeed", "WalkSpeed", Ascendant.Config.Character, 16, 200, 0, function(v)
+        local hum = Utility:GetHumanoid(LocalPlayer.Character)
+        if hum then hum.WalkSpeed = v end
+    end)
+    self:CreateSlider(content, "JumpPower", "JumpPower", Ascendant.Config.Character, 50, 300, 0, function(v)
+        local hum = Utility:GetHumanoid(LocalPlayer.Character)
+        if hum then hum.JumpPower = v end
+    end)
+    self:CreateToggle(content, "Fly", "Fly", Ascendant.Config.Character, function(v)
+        if v then Features:EnableFly() else Features:DisableFly() end
+    end)
+    self:CreateToggle(content, "NoClip", "NoClip", Ascendant.Config.Character, function(v)
+        if v then Features:EnableNoClip() else Features:DisableNoClip() end
+    end)
+    self:CreateToggle(content, "Infinite Jump", "InfiniteJump", Ascendant.Config.Character)
+    self:CreateToggle(content, "Anti-Aim", "AntiAim", Ascendant.Config.Character, function(v)
+        if v then Features:EnableAntiAim() else Features:DisableAntiAim() end
+    end)
+end
+
+function UI:BuildMiscTab(parent)
+    local loadoutSection, loadoutContent = self:CreateSection(parent, "Auto Loadout")
+    self:CreateToggle(loadoutContent, "Enable", "AutoLoadout", Ascendant.Config.Misc)
+    self:CreateDropdown(loadoutContent, "Primary Weapon", "PrimaryWeapon", Ascendant.Config.Misc,
+        {"Shotgun", "Assault Rifle", "SMG", "Sniper"})
+    self:CreateDropdown(loadoutContent, "Secondary Weapon", "SecondaryWeapon", Ascendant.Config.Misc,
+        {"Revolver", "Pistol", "Deagle"})
+    self:CreateDropdown(loadoutContent, "Fist Weapon", "FistWeapon", Ascendant.Config.Misc,
+        {"Fists", "Knife", "Brass Knuckles"})
+    self:CreateDropdown(loadoutContent, "Grenade Weapon", "GrenadeWeapon", Ascendant.Config.Misc,
+        {"Grenade", "Molotov", "Flashbang"})
+
+    local gunSection, gunContent = self:CreateSection(parent, "Gun Mode")
+    self:CreateToggle(gunContent, "Auto Shoot", "AutoShoot", Ascendant.Config.Misc)
+    self:CreateToggle(gunContent, "Rapid Fire", "RapidFire", Ascendant.Config.Misc)
+    self:CreateToggle(gunContent, "Rapid Melee", "RapidMelee", Ascendant.Config.Misc)
+
+    local voteSection, voteContent = self:CreateSection(parent, "Auto Vote")
+    self:CreateToggle(voteContent, "Enable", "AutoVote", Ascendant.Config.Misc)
+    self:CreateDropdown(voteContent, "Vote Map", "VoteMap", Ascendant.Config.Misc,
+        {"Chess", "Warehouse", "Dust", "Inferno"})
+
+    local queueSection, queueContent = self:CreateSection(parent, "Queue")
+    self:CreateToggle(queueContent, "Enable", "Queue", Ascendant.Config.Misc)
+    self:CreateDropdown(queueContent, "Mode", "QueueMode", Ascendant.Config.Misc,
+        {"1v1", "2v2", "3v3", "FFA"})
+
+    local miscSection, miscContent = self:CreateSection(parent, "Miscellaneous")
+    self:CreateToggle(miscContent, "Wallbang", "Wallbang", Ascendant.Config.Misc)
+    self:CreateToggle(miscContent, "Anti-AFK", "AntiAFK", Ascendant.Config.Misc)
+    self:CreateToggle(miscContent, "Rejoin On Kick", "RejoinOnKick", Ascendant.Config.Misc)
+end
+
+function UI:BuildUISettingsTab(parent)
+    local menuSection, menuContent = self:CreateSection(parent, "Menu")
+    self:CreateToggle(menuContent, "Show Toggle UI (Mobile)", "ShowToggleUI", Ascendant.Config.UI)
+    self:CreateToggle(menuContent, "Show Watermark (Mobile)", "ShowWatermark", Ascendant.Config.UI)
+    self:CreateToggle(menuContent, "Show Lock UI (Mobile)", "ShowLockUI", Ascendant.Config.UI)
+    self:CreateToggle(menuContent, "Custom Cursor", "CustomCursor", Ascendant.Config.UI)
+
+    local bindSection, bindContent = self:CreateSection(parent, "Menu Bind")
+    self:CreateDropdown(bindContent, "Keybind", "KeybindStr", {KeybindStr = "RightShift"},
+        {"RightShift", "LeftShift", "Insert", "Delete", "F1", "F2"}, function(v)
+            local map = {
+                RightShift = Enum.KeyCode.RightShift,
+                LeftShift  = Enum.KeyCode.LeftShift,
+                Insert     = Enum.KeyCode.Insert,
+                Delete     = Enum.KeyCode.Delete,
+                F1         = Enum.KeyCode.F1,
+                F2         = Enum.KeyCode.F2,
+            }
+            Ascendant.Config.UI.Keybind = map[v] or Enum.KeyCode.RightShift
+        end)
+    self:CreateButton(bindContent, "Unload", function()
+        if Ascendant.Runtime.ScreenGui then
+            Ascendant.Runtime.ScreenGui:Destroy()
+        end
+        Features:Cleanup()
+    end)
+
+    local themeSection, themeContent = self:CreateSection(parent, "Themes")
+    self:CreateColorPicker(themeContent, "Background color", function(c) Ascendant.Theme.Background = c end)
+    self:CreateColorPicker(themeContent, "Main color", function(c) Ascendant.Theme.Surface = c end)
+    self:CreateColorPicker(themeContent, "Accent color", function(c) Ascendant.Theme.Accent = c end)
+
+    local configSection, configContent = self:CreateSection(parent, "Configuration")
+    local configNameTable = {ConfigName = "Default"}
+    self:CreateTextBox(configContent, "Config name", "ConfigName", configNameTable)
+    self:CreateButton(configContent, "Create config", function()
+        print("[AH] Config created: " .. configNameTable.ConfigName)
+    end)
+    local configListTable = {ConfigList = "--"}
+    self:CreateDropdown(configContent, "Config list", "ConfigList", configListTable,
+        {"--", "Default", "Aggro", "Legit"})
+    self:CreateButton(configContent, "Load config", function() end)
+    self:CreateButton(configContent, "Overwrite config", function() end)
+    self:CreateButton(configContent, "Delete config", function() end)
+    self:CreateButton(configContent, "Refresh list", function() end)
+    self:CreateButton(configContent, "Set as autoload", function() end)
+    self:CreateButton(configContent, "Reset autoload", function() end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- FEATURE ENGINE
+-- ═══════════════════════════════════════════════════════════════
+
+local Features = {}
+
+function Features:Init()
+    -- FOV circle
+    local fov = Drawing.new("Circle")
+    fov.Visible = false
+    fov.Thickness = 1.2
+    fov.Color = Color3.fromRGB(255, 255, 255)
+    fov.Transparency = 0.7
+    fov.NumSides = 64
+    fov.Radius = Ascendant.Config.SilentAim.FOVRadius
+    fov.Filled = false
+    Ascendant.Runtime.FOVDrawing = fov
+
+    -- Crosshair lines (top, bottom, left, right)
+    for i = 1, 4 do
+        local line = Drawing.new("Line")
+        line.Visible = Ascendant.Config.Visual.Crosshair
+        line.Thickness = 1.5
+        line.Color = Ascendant.Config.Visual.CrosshairColor
+        line.Transparency = 0.9
+        table.insert(Ascendant.Runtime.CrosshairDrawings, line)
+    end
+
+    RunService.RenderStepped:Connect(function(dt)
+        self:UpdateFOV()
+        self:UpdateCrosshair()
+        self:UpdateESP()
+        self:SilentAimStep()
+        self:RagebotStep(dt)
+        self:AutoShootStep()
+    end)
+
+    -- Infinite jump
+    UserInputService.JumpRequest:Connect(function()
+        if Ascendant.Config.Character.InfiniteJump then
+            local hum = Utility:GetHumanoid(LocalPlayer.Character)
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end)
+
+    -- Anti-AFK
+    task.spawn(function()
+        while task.wait(60) do
+            if Ascendant.Config.Misc.AntiAFK then
+                VirtualUser:Button2Down(Vector2.new(0,0), Camera.CFrame)
+                task.wait(0.1)
+                VirtualUser:Button2Up(Vector2.new(0,0), Camera.CFrame)
+            end
+        end
+    end)
+end
+
+function Features:UpdateFOV()
+    local fov = Ascendant.Runtime.FOVDrawing
+    if not fov then return end
+    fov.Visible = Ascendant.Config.SilentAim.ShowFOV and Ascendant.Config.SilentAim.Enabled
+    fov.Position = Vector2.new(Mouse.X, Mouse.Y + 36)
+    fov.Radius = Ascendant.Config.SilentAim.FOVRadius
+end
+
+function Features:UpdateCrosshair()
+    local size = Ascendant.Config.Visual.CrosshairSize
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local d = Ascendant.Runtime.CrosshairDrawings
+    if #d < 4 then return end
+
+    d[1].From = Vector2.new(center.X - size - 2, center.Y)
+    d[1].To   = Vector2.new(center.X - 2, center.Y)
+    d[2].From = Vector2.new(center.X + 2, center.Y)
+    d[2].To   = Vector2.new(center.X + size + 2, center.Y)
+    d[3].From = Vector2.new(center.X, center.Y - size - 2)
+    d[3].To   = Vector2.new(center.X, center.Y - 2)
+    d[4].From = Vector2.new(center.X, center.Y + 2)
+    d[4].To   = Vector2.new(center.X, center.Y + size + 2)
+
+    for _, line in ipairs(d) do
+        line.Visible = Ascendant.Config.Visual.Crosshair
+        line.Color = Ascendant.Config.Visual.CrosshairColor
+    end
+end
+
+function Features:GetTarget()
+    local closest = nil
+    local shortest = math.huge
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if Ascendant.Config.SilentAim.TeamCheck and Utility:IsTeamMate(player) then continue end
+
+        local character = Utility:GetCharacter(player)
+        local part = character and character:FindFirstChild(Ascendant.Config.SilentAim.TargetPart)
+        if not part then continue end
+
+        local screenPos, onScreen = Utility:WorldToScreen(part.Position)
+        if not onScreen then continue end
+
+        local distToMouse = (screenPos - mousePos).Magnitude
+        if distToMouse > Ascendant.Config.SilentAim.FOVRadius and not Ascendant.Config.SilentAim.IgnoreFOV then continue end
+
+        local worldDist = Utility:GetDistance(part.Position)
+        if worldDist < shortest then
+            shortest = worldDist
+            closest = part
+        end
+    end
+
+    return closest
+end
+
+function Features:SilentAimStep()
+    if not Ascendant.Config.SilentAim.Enabled then return end
+    local target = self:GetTarget()
+    if target then
+        Ascendant.Runtime.CurrentTarget = target
+    end
+end
+
+function Features:RagebotStep(dt)
+    if not Ascendant.Config.Ragebot.Enabled then return end
+
+    local character = LocalPlayer.Character
+    local hrp = Utility:GetRootPart(character)
+    if not hrp then return end
+
+    if not Ascendant.Runtime.CurrentTarget or not Ascendant.Runtime.CurrentTarget.Parent then
+        Ascendant.Runtime.CurrentTarget = self:GetTarget()
+    end
+    local target = Ascendant.Runtime.CurrentTarget
+    if not target then return end
+
+    -- *orbital mechanics: the socket registers 0.016s of arc every frame,
+    --  ticking the angle forward by speed*dt. the math.cos/sin pair is the
+    --  orbit's heartbeat — two perpendicular sinusoids 90° out of phase,
+    --  tracing a circle in XZ space around whatever the target part
+    --  happens to occupy this tick.*
+    Ascendant.Runtime.OrbitAngle = Ascendant.Runtime.OrbitAngle
+        + (Ascendant.Config.Ragebot.OrbitSpeed * dt)
+
+    local r  = Ascendant.Config.Ragebot.OrbitRadius
+    local tp = target.Position
+    local orbitPos = Vector3.new(
+        tp.X + math.cos(Ascendant.Runtime.OrbitAngle) * r,
+        tp.Y + Ascendant.Config.Ragebot.OrbitHeight + Ascendant.Config.Ragebot.HeightAdjust,
+        tp.Z + math.sin(Ascendant.Runtime.OrbitAngle) * r
+    )
+
+    hrp.CFrame = CFrame.new(orbitPos, tp)
+    hrp.Velocity = Vector3.zero
+    hrp.RotVelocity = Vector3.zero
+
+    if Ascendant.Config.Ragebot.AutoShoot then
+        local tool = character:FindFirstChildOfClass("Tool")
+        if tool then tool:Activate() end
+    end
+end
+
+function Features:AutoShootStep()
+    if not Ascendant.Config.Misc.AutoShoot then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    local tool = character:FindFirstChildOfClass("Tool")
+    if tool and self:GetTarget() then
+        tool:Activate()
+    end
+end
+
+function Features:UpdateESP()
+    if not Ascendant.Config.ESP.Enabled then
+        for _, obj in pairs(Ascendant.Runtime.ESPObjects) do
+            for _, drawing in pairs(obj) do
+                drawing.Visible = false
+            end
+        end
+        return
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if Ascendant.Config.ESP.TeamCheck and Utility:IsTeamMate(player) then
+            self:HideESP(player); continue
+        end
+
+        local character = Utility:GetCharacter(player)
+        if not character then self:HideESP(player); continue end
+
+        local hrp  = Utility:GetRootPart(character)
+        local head = character:FindFirstChild("Head")
+        local hum  = Utility:GetHumanoid(character)
+        if not hrp or not head or not hum then self:HideESP(player); continue end
+
+        if Utility:GetDistance(hrp.Position) > Ascendant.Config.ESP.MaxDistance then
+            self:HideESP(player); continue
+        end
+
+        if Ascendant.Config.ESP.VisibleOnly then
+            local visible = Utility:RaycastVisible(Camera.CFrame.Position, head.Position, {LocalPlayer.Character, character})
+            if not visible then self:HideESP(player); continue end
+        end
+
+        self:DrawESP(player, character, hrp, head, hum)
+    end
+end
+
+function Features:GetESPObject(player)
+    if Ascendant.Runtime.ESPObjects[player] then
+        return Ascendant.Runtime.ESPObjects[player]
+    end
+
+    local obj = {}
+
+    if Ascendant.Config.ESP.Boxes then
+        local box = Drawing.new("Square")
+        box.Thickness = 1
+        box.Filled = false
+        box.Color = Ascendant.Config.ESP.BoxColor
+        obj.Box = box
+    end
+
+    if Ascendant.Config.ESP.HealthBars then
+        local bar = Drawing.new("Line")
+        bar.Thickness = 2
+        obj.HealthBar = bar
+    end
+
+    if Ascendant.Config.ESP.Names then
+        local name = Drawing.new("Text")
+        name.Size = 13
+        name.Font = Drawing.Fonts.UI
+        name.Center = true
+        name.Outline = true
+        name.Color = Color3.new(1, 1, 1)
+        obj.Name = name
+    end
+
+    if Ascendant.Config.ESP.Tracers then
+        local tracer = Drawing.new("Line")
+        tracer.Thickness = 1
+        tracer.Color = Ascendant.Config.ESP.BoxColor
+        obj.Tracer = tracer
+    end
+
+    Ascendant.Runtime.ESPObjects[player] = obj
+    return obj
+end
+
+function Features:HideESP(player)
+    local obj = Ascendant.Runtime.ESPObjects[player]
+    if not obj then return end
+    for _, drawing in pairs(obj) do
+        drawing.Visible = false
+    end
+end
+
+function Features:DrawESP(player, character, hrp, head, hum)
+    local obj = self:GetESPObject(player)
+
+    local headScreen, headOn = Utility:WorldToScreen(head.Position)
+    local footScreen, footOn = Utility:WorldToScreen(hrp.Position - Vector3.new(0, 3, 0))
+
+    if not headOn or not footOn then
+        self:HideESP(player); return
+    end
+
+    local boxH = math.abs(footScreen.Y - headScreen.Y)
+    local boxW = boxH * 0.55
+
+    if obj.Box then
+        obj.Box.Visible = true
+        obj.Box.Size    = Vector2.new(boxW, boxH)
+        obj.Box.Position = Vector2.new(headScreen.X - boxW / 2, headScreen.Y)
+        obj.Box.Color   = Ascendant.Config.ESP.BoxColor
+    end
+
+    if obj.HealthBar then
+        local hp = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+        obj.HealthBar.Visible = true
+        obj.HealthBar.From  = Vector2.new(headScreen.X - boxW / 2 - 6, footScreen.Y)
+        obj.HealthBar.To    = Vector2.new(headScreen.X - boxW / 2 - 6, footScreen.Y - boxH * hp)
+        obj.HealthBar.Color = Color3.fromRGB(255 * (1 - hp), 255 * hp, 50)
+    end
+
+    if obj.Name then
+        obj.Name.Visible  = true
+        obj.Name.Position = Vector2.new(headScreen.X, headScreen.Y - 16)
+        obj.Name.Text     = player.Name
+    end
+
+    if obj.Tracer then
+        obj.Tracer.Visible = true
+        obj.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+        obj.Tracer.To   = Vector2.new(headScreen.X, footScreen.Y)
+        obj.Tracer.Color = Ascendant.Config.ESP.BoxColor
+    end
+end
+
+function Features:EnableFly()
+    if Ascendant.Runtime.FlyConnection then return end
+    local character = LocalPlayer.Character
+    local hrp = Utility:GetRootPart(character)
+    if not hrp then return end
+
+    -- *bodyGyro holds attitude; bodyVel holds velocity —
+    --  together they make the HRP float like it owns the sky.*
+    local bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.P = 9e4
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.CFrame = hrp.CFrame
+    bodyGyro.Parent = hrp
+
+    local bodyVel = Instance.new("BodyVelocity")
+    bodyVel.Velocity = Vector3.zero
+    bodyVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVel.Parent = hrp
+
+    Ascendant.Runtime.FlyConnection = RunService.RenderStepped:Connect(function()
+        if not Ascendant.Config.Character.Fly then
+            self:DisableFly()
+            return
+        end
+        local cam = Camera.CFrame
+        local dir = Vector3.zero
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0, 1, 0) end
+
+        bodyVel.Velocity = dir.Magnitude > 0 and dir.Unit * Ascendant.Config.Character.FlySpeed or Vector3.zero
+        bodyGyro.CFrame = cam
+    end)
+end
+
+function Features:DisableFly()
+    if Ascendant.Runtime.FlyConnection then
+        Ascendant.Runtime.FlyConnection:Disconnect()
+        Ascendant.Runtime.FlyConnection = nil
+    end
+    local hrp = Utility:GetRootPart(LocalPlayer.Character)
+    if hrp then
+        for _, child in ipairs(hrp:GetChildren()) do
+            if child:IsA("BodyGyro") or child:IsA("BodyVelocity") then
+                child:Destroy()
+            end
+        end
+    end
+end
+
+function Features:EnableNoClip()
+    if Ascendant.Runtime.NoClipConnection then return end
+    Ascendant.Runtime.NoClipConnection = RunService.Stepped:Connect(function()
+        if not Ascendant.Config.Character.NoClip then
+            self:DisableNoClip()
+            return
+        end
+        local character = LocalPlayer.Character
+        if not character then return end
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+function Features:DisableNoClip()
+    if Ascendant.Runtime.NoClipConnection then
+        Ascendant.Runtime.NoClipConnection:Disconnect()
+        Ascendant.Runtime.NoClipConnection = nil
+    end
+end
+
+function Features:EnableAntiAim()
+    if Ascendant.Runtime.AntiAimConnection then return end
+    Ascendant.Runtime.AntiAimConnection = RunService.RenderStepped:Connect(function()
+        if not Ascendant.Config.Character.AntiAim then
+            self:DisableAntiAim()
+            return
+        end
+        local hrp = Utility:GetRootPart(LocalPlayer.Character)
+        if not hrp then return end
+        hrp.CFrame = hrp.CFrame * CFrame.Angles(
+            math.random(-10, 10) / 100,
+            math.random(-180, 180) / 100,
+            0
+        )
+    end)
+end
+
+function Features:DisableAntiAim()
+    if Ascendant.Runtime.AntiAimConnection then
+        Ascendant.Runtime.AntiAimConnection:Disconnect()
+        Ascendant.Runtime.AntiAimConnection = nil
+    end
+end
+
+function Features:Cleanup()
+    self:DisableFly()
+    self:DisableNoClip()
+    self:DisableAntiAim()
+
+    if Ascendant.Runtime.FOVDrawing then
+        Ascendant.Runtime.FOVDrawing:Remove()
+    end
+    for _, d in ipairs(Ascendant.Runtime.CrosshairDrawings) do
+        pcall(function() d:Remove() end)
+    end
+    for _, obj in pairs(Ascendant.Runtime.ESPObjects) do
+        for _, drawing in pairs(obj) do
+            pcall(function() drawing:Remove() end)
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- BOOT
+-- ═══════════════════════════════════════════════════════════════
+
+UI:Init()
+Features:Init()
+
+print(string.format("[%s] Injected. Version: %s | Mobile: %s",
+    Ascendant.Name, Ascendant.Version, tostring(Ascendant.Runtime.IsMobile)))
