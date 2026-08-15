@@ -1,0 +1,603 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local SilentAimModule = {}
+local GUIModule = {}
+local TargetModule = {}
+
+function TargetModule.new()
+    local self = setmetatable({}, {__index = TargetModule})
+    self.targets = {}
+    self.current_target = nil
+    return self
+end
+
+function TargetModule:GetPlayers()
+    local players = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Humanoid") then
+            local character = player.Character
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local rootPart = character:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    local head = character:FindFirstChild("Head")
+                    local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+                    local distance = (rootPart.Position - Camera.CFrame.Position).Magnitude
+                    local visible = self:IsVisible(rootPart)
+                    table.insert(players, {
+                        Player = player,
+                        Character = character,
+                        Humanoid = humanoid,
+                        RootPart = rootPart,
+                        Head = head,
+                        Torso = torso,
+                        Distance = distance,
+                        Visible = visible,
+                        Position = rootPart.Position
+                    })
+                end
+            end
+        end
+    end
+    return players
+end
+
+function TargetModule:IsVisible(part)
+    if not part then return false end
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin).Unit
+    local ray = Ray.new(origin, direction * (part.Position - origin).Magnitude)
+    local hit, position = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, Camera})
+    if hit then
+        local distanceToHit = (position - origin).Magnitude
+        local distanceToTarget = (part.Position - origin).Magnitude
+        return distanceToHit >= distanceToTarget - 2
+    end
+    return true
+end
+
+function TargetModule:GetClosestTarget()
+    local players = self:GetPlayers()
+    local closest = nil
+    local closestDistance = math.huge
+    for _, player in ipairs(players) do
+        if player.Visible then
+            local distance = player.Distance
+            if distance < closestDistance then
+                closestDistance = distance
+                closest = player
+            end
+        end
+    end
+    return closest
+end
+
+function SilentAimModule.new()
+    local self = setmetatable({}, {__index = SilentAimModule})
+    self.enabled = false
+    self.hit_chance = 100
+    self.fov_radius = 200
+    self.smoothness = 3
+    self.target_part = "Head"
+    self.target_module = TargetModule.new()
+    self.last_update = 0
+    self.update_rate = 0.05
+    return self
+end
+
+function SilentAimModule:Toggle()
+    self.enabled = not self.enabled
+    return self.enabled
+end
+
+function SilentAimModule:GetTargetPosition(target)
+    if not target then return nil end
+    if self.target_part == "Head" and target.Head then
+        return target.Head.Position
+    elseif self.target_part == "Torso" and target.Torso then
+        return target.Torso.Position
+    elseif target.RootPart then
+        return target.RootPart.Position
+    end
+    return nil
+end
+
+function SilentAimModule:CalculateAngle(current, target)
+    local delta = target - current
+    local magnitude = delta.Magnitude
+    if magnitude < 0.1 then return nil end
+    local pitch = math.asin(delta.Y / magnitude)
+    local yaw = math.atan2(-delta.X, -delta.Z)
+    return Vector3.new(pitch, yaw, 0)
+end}
+
+function SilentAimModule:ApplySilentAim()
+    if not self.enabled then return end
+    local currentTime = tick()
+    if currentTime - self.last_update < self.update_rate then return end
+    self.last_update = currentTime
+    
+    local target = self.target_module:GetClosestTarget()
+    if not target then return end
+    
+    local targetPos = self:GetTargetPosition(target)
+    if not targetPos then return end
+    
+    local hitChance = math.random(1, 100)
+    if hitChance > self.hit_chance then return end
+    
+    local cameraPos = Camera.CFrame.Position
+    local direction = (targetPos - cameraPos).Unit
+    local angle = self:CalculateAngle(cameraPos, targetPos)
+    if not angle then return end
+    
+    local newCFrame = CFrame.new(cameraPos, targetPos)
+    Camera.CFrame = Camera.CFrame:Lerp(newCFrame, self.smoothness / 100)
+end
+
+function SilentAimModule:SetHitChance(value)
+    self.hit_chance = math.clamp(value, 1, 100)
+end
+
+function SilentAimModule:SetFOV(value)
+    self.fov_radius = math.clamp(value, 0, 360)
+end
+
+function SilentAimModule:SetSmoothness(value)
+    self.smoothness = math.clamp(value, 0, 20)
+end
+
+function SilentAimModule:SetTargetPart(part)
+    self.target_part = part
+end
+
+function GUIModule.new()
+    local self = setmetatable({}, {__index = GUIModule})
+    self.gui = nil
+    self.main_frame = nil
+    self.visible = false
+    self.dragging = false
+    self.drag_start = nil
+    self.start_pos = nil
+    self.silent_aim = nil
+    return self
+end
+
+function GUIModule:ToggleGUI()
+    self.visible = not self.visible
+    if self.main_frame then
+        self.main_frame.Visible = self.visible
+    end
+end
+
+function GUIModule:CreateGUI(silentAim)
+    self.silent_aim = silentAim
+    
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "SilentAimGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    self.gui = screenGui
+    
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 320, 0, 280)
+    mainFrame.Position = UDim2.new(0.5, -160, 0.5, -140)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    mainFrame.BackgroundTransparency = 0.1
+    mainFrame.BorderSizePixel = 0
+    mainFrame.ClipsDescendants = true
+    mainFrame.Parent = screenGui
+    mainFrame.Visible = false
+    self.main_frame = mainFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = mainFrame
+    
+    local shadow = Instance.new("ImageLabel")
+    shadow.Size = UDim2.new(1, 20, 1, 20)
+    shadow.Position = UDim2.new(0, -10, 0, -10)
+    shadow.BackgroundTransparency = 1
+    shadow.Image = "rbxassetid://1316041423"
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(10, 10, 10, 10)
+    shadow.Parent = mainFrame
+    
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0, 35)
+    titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    titleBar.BackgroundTransparency = 0.2
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = mainFrame
+    
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 12)
+    titleCorner.Parent = titleBar
+    
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -50, 1, 0)
+    titleLabel.Position = UDim2.new(0, 15, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Silent Aim"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextSize = 16
+    titleLabel.Font = Enum.Font.GothamSemibold
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = titleBar
+    
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0, 2.5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    closeBtn.BackgroundTransparency = 0
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 14
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Parent = titleBar
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 6)
+    closeCorner.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        self:ToggleGUI()
+    end)
+    
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Size = UDim2.new(1, -20, 1, -50)
+    contentFrame.Position = UDim2.new(0, 10, 0, 45)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = mainFrame
+    
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, 0)
+    scroll.BackgroundTransparency = 1
+    scroll.ScrollBarThickness = 4
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 80)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 350)
+    scroll.Parent = contentFrame
+    
+    local yPos = 5
+    local function createToggle(label, default, callback)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, -10, 0, 35)
+        frame.Position = UDim2.new(0, 5, 0, yPos)
+        frame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        frame.BackgroundTransparency = 0.3
+        frame.BorderSizePixel = 0
+        frame.Parent = scroll
+        
+        local frameCorner = Instance.new("UICorner")
+        frameCorner.CornerRadius = UDim.new(0, 6)
+        frameCorner.Parent = frame
+        
+        local labelText = Instance.new("TextLabel")
+        labelText.Size = UDim2.new(0.65, 0, 1, 0)
+        labelText.Position = UDim2.new(0, 10, 0, 0)
+        labelText.BackgroundTransparency = 1
+        labelText.Text = label
+        labelText.TextColor3 = Color3.fromRGB(220, 220, 220)
+        labelText.TextSize = 13
+        labelText.Font = Enum.Font.Gotham
+        labelText.TextXAlignment = Enum.TextXAlignment.Left
+        labelText.Parent = frame
+        
+        local toggleBtn = Instance.new("TextButton")
+        toggleBtn.Size = UDim2.new(0, 45, 1, -6)
+        toggleBtn.Position = UDim2.new(0.8, 0, 0, 3)
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 70)
+        toggleBtn.BorderSizePixel = 0
+        toggleBtn.Text = default and "ON" or "OFF"
+        toggleBtn.TextColor3 = default and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+        toggleBtn.TextSize = 12
+        toggleBtn.Font = Enum.Font.GothamBold
+        toggleBtn.Parent = frame
+        
+        local toggleCorner = Instance.new("UICorner")
+        toggleCorner.CornerRadius = UDim.new(0, 5)
+        toggleCorner.Parent = toggleBtn
+        
+        local state = default or false
+        toggleBtn.BackgroundColor3 = state and Color3.fromRGB(40, 90, 40) or Color3.fromRGB(55, 55, 70)
+        
+        toggleBtn.MouseButton1Click:Connect(function()
+            state = not state
+            toggleBtn.Text = state and "ON" or "OFF"
+            toggleBtn.TextColor3 = state and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+            toggleBtn.BackgroundColor3 = state and Color3.fromRGB(40, 90, 40) or Color3.fromRGB(55, 55, 70)
+            if callback then callback(state) end
+        end)
+        
+        yPos = yPos + 40
+        return toggleBtn
+    end
+    
+    local function createSlider(label, min, max, default, callback)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, -10, 0, 50)
+        frame.Position = UDim2.new(0, 5, 0, yPos)
+        frame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        frame.BackgroundTransparency = 0.3
+        frame.BorderSizePixel = 0
+        frame.Parent = scroll
+        
+        local frameCorner = Instance.new("UICorner")
+        frameCorner.CornerRadius = UDim.new(0, 6)
+        frameCorner.Parent = frame
+        
+        local labelText = Instance.new("TextLabel")
+        labelText.Size = UDim2.new(0.65, 0, 0.5, 0)
+        labelText.Position = UDim2.new(0, 10, 0, 0)
+        labelText.BackgroundTransparency = 1
+        labelText.Text = label
+        labelText.TextColor3 = Color3.fromRGB(220, 220, 220)
+        labelText.TextSize = 13
+        labelText.Font = Enum.Font.Gotham
+        labelText.TextXAlignment = Enum.TextXAlignment.Left
+        labelText.Parent = frame
+        
+        local valueText = Instance.new("TextLabel")
+        valueText.Size = UDim2.new(0.2, 0, 0.5, 0)
+        valueText.Position = UDim2.new(0.8, 0, 0, 0)
+        valueText.BackgroundTransparency = 1
+        valueText.Text = tostring(default)
+        valueText.TextColor3 = Color3.fromRGB(200, 200, 200)
+        valueText.TextSize = 13
+        valueText.Font = Enum.Font.GothamBold
+        valueText.TextXAlignment = Enum.TextXAlignment.Right
+        valueText.Parent = frame
+        
+        local slider = Instance.new("Frame")
+        slider.Size = UDim2.new(0.9, 0, 0.3, 0)
+        slider.Position = UDim2.new(0.05, 0, 0.6, 0)
+        slider.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+        slider.BorderSizePixel = 0
+        slider.Parent = frame
+        
+        local sliderCorner = Instance.new("UICorner")
+        sliderCorner.CornerRadius = UDim.new(0, 4)
+        sliderCorner.Parent = slider
+        
+        local fill = Instance.new("Frame")
+        fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+        fill.BackgroundColor3 = Color3.fromRGB(80, 150, 255)
+        fill.BorderSizePixel = 0
+        fill.Parent = slider
+        
+        local fillCorner = Instance.new("UICorner")
+        fillCorner.CornerRadius = UDim.new(0, 4)
+        fillCorner.Parent = fill
+        
+        local handle = Instance.new("TextButton")
+        handle.Size = UDim2.new(0, 16, 0, 16)
+        handle.Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8)
+        handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        handle.BorderSizePixel = 0
+        handle.Text = ""
+        handle.Parent = slider
+        
+        local handleCorner = Instance.new("UICorner")
+        handleCorner.CornerRadius = UDim.new(0, 8)
+        handleCorner.Parent = handle
+        
+        local dragging = false
+        local function updateSlider(input)
+            local relativeX = math.clamp((input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X, 0, 1)
+            local value = min + (max - min) * relativeX
+            value = math.floor(value)
+            fill.Size = UDim2.new(relativeX, 0, 1, 0)
+            handle.Position = UDim2.new(relativeX, -8, 0.5, -8)
+            valueText.Text = tostring(value)
+            if callback then callback(value) end
+        end
+        
+        handle.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+            end
+        end)
+        
+        handle.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+        
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                updateSlider(input)
+            end
+        end)
+        
+        slider.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                updateSlider(input)
+            end
+        end)
+        
+        yPos = yPos + 55
+    end
+    
+    local function createDropdown(label, options, default, callback)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, -10, 0, 40)
+        frame.Position = UDim2.new(0, 5, 0, yPos)
+        frame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        frame.BackgroundTransparency = 0.3
+        frame.BorderSizePixel = 0
+        frame.Parent = scroll
+        
+        local frameCorner = Instance.new("UICorner")
+        frameCorner.CornerRadius = UDim.new(0, 6)
+        frameCorner.Parent = frame
+        
+        local labelText = Instance.new("TextLabel")
+        labelText.Size = UDim2.new(0.55, 0, 1, 0)
+        labelText.Position = UDim2.new(0, 10, 0, 0)
+        labelText.BackgroundTransparency = 1
+        labelText.Text = label
+        labelText.TextColor3 = Color3.fromRGB(220, 220, 220)
+        labelText.TextSize = 13
+        labelText.Font = Enum.Font.Gotham
+        labelText.TextXAlignment = Enum.TextXAlignment.Left
+        labelText.Parent = frame
+        
+        local dropdownBtn = Instance.new("TextButton")
+        dropdownBtn.Size = UDim2.new(0.35, 0, 1, -6)
+        dropdownBtn.Position = UDim2.new(0.6, 0, 0, 3)
+        dropdownBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+        dropdownBtn.BorderSizePixel = 0
+        dropdownBtn.Text = default or options[1]
+        dropdownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        dropdownBtn.TextSize = 12
+        dropdownBtn.Font = Enum.Font.Gotham
+        dropdownBtn.Parent = frame
+        
+        local dropCorner = Instance.new("UICorner")
+        dropCorner.CornerRadius = UDim.new(0, 5)
+        dropCorner.Parent = dropdownBtn
+        
+        local currentIndex = 1
+        for i, opt in ipairs(options) do
+            if opt == default then
+                currentIndex = i
+                break
+            end
+        end
+        
+        dropdownBtn.MouseButton1Click:Connect(function()
+            currentIndex = currentIndex % #options + 1
+            dropdownBtn.Text = options[currentIndex]
+            if callback then callback(options[currentIndex]) end
+        end)
+        
+        yPos = yPos + 45
+    end
+    
+    createToggle("Enable Silent Aim", false, function(state)
+        if self.silent_aim then
+            self.silent_aim.enabled = state
+        end
+    end)
+    
+    createSlider("Hit Chance", 1, 100, 100, function(value)
+        if self.silent_aim then
+            self.silent_aim:SetHitChance(value)
+        end
+    end)
+    
+    createSlider("FOV Radius", 0, 360, 200, function(value)
+        if self.silent_aim then
+            self.silent_aim:SetFOV(value)
+        end
+    end)
+    
+    createSlider("Smoothness", 0, 20, 3, function(value)
+        if self.silent_aim then
+            self.silent_aim:SetSmoothness(value)
+        end
+    end)
+    
+    createDropdown("Target Part", {"Head", "Torso", "Root"}, "Head", function(value)
+        if self.silent_aim then
+            self.silent_aim:SetTargetPart(value)
+        end
+    end)
+    
+    local statusFrame = Instance.new("Frame")
+    statusFrame.Size = UDim2.new(1, -10, 0, 30)
+    statusFrame.Position = UDim2.new(0, 5, 0, yPos)
+    statusFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    statusFrame.BackgroundTransparency = 0.3
+    statusFrame.BorderSizePixel = 0
+    statusFrame.Parent = scroll
+    
+    local statusCorner = Instance.new("UICorner")
+    statusCorner.CornerRadius = UDim.new(0, 6)
+    statusCorner.Parent = statusFrame
+    
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, 0, 1, 0)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Disabled"
+    statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    statusLabel.TextSize = 13
+    statusLabel.Font = Enum.Font.GothamBold
+    statusLabel.Parent = statusFrame
+    
+    local drag = false
+    local dragStart = nil
+    local startPos = nil
+    
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            drag = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+        end
+    end)
+    
+    titleBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            drag = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if drag and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    
+    local keybind = Instance.new("Keybind")
+    keybind.KeyCode = Enum.KeyCode.Insert
+    keybind.Parent = screenGui
+    keybind:GetPropertyChangedSignal("Enabled"):Connect(function()
+        self:ToggleGUI()
+    end)
+    
+    self.status_label = statusLabel
+end
+
+function GUIModule:UpdateStatus(enabled)
+    if self.status_label then
+        self.status_label.Text = enabled and "Status: Enabled" or "Status: Disabled"
+        self.status_label.TextColor3 = enabled and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+    end
+end
+
+local silent_aim = SilentAimModule.new()
+local gui = GUIModule.new()
+gui:CreateGUI(silent_aim)
+
+RunService.Heartbeat:Connect(function(deltaTime)
+    if silent_aim.enabled then
+        silent_aim:ApplySilentAim()
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        local state = silent_aim:Toggle()
+        gui:UpdateStatus(state)
+        print("Silent Aim: " .. (state and "ON" or "OFF"))
+    end
+end)
+
+print("Silent Aim Loaded | Press Insert to toggle GUI")
+print("Press Right Shift to toggle Silent Aim")
