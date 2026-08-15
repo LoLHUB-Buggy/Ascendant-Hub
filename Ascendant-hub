@@ -1,0 +1,950 @@
+-- ╔═══════════════════════════════════════╗
+-- ║       Ascendant Hub v1.0              ║
+-- ║       Mobile-optimised | Rivals       ║
+-- ╚═══════════════════════════════════════╝
+
+local Players         = game:GetService("Players")
+local RunService      = game:GetService("RunService")
+local UserInputService= game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService    = game:GetService("TweenService")
+local HttpService     = game:GetService("HttpService")
+local Camera          = workspace.CurrentCamera
+local LocalPlayer     = Players.LocalPlayer
+
+-- ─── THEME ───────────────────────────────────────────────
+local THEME = {
+    BG          = Color3.fromRGB(18, 18, 28),
+    PANEL       = Color3.fromRGB(25, 25, 38),
+    SECTION     = Color3.fromRGB(30, 30, 45),
+    TAB_ACTIVE  = Color3.fromRGB(50, 50, 90),
+    TAB_IDLE    = Color3.fromRGB(30, 30, 48),
+    ACCENT      = Color3.fromRGB(80, 120, 255),
+    TEXT        = Color3.fromRGB(220, 220, 220),
+    SUBTEXT     = Color3.fromRGB(160, 160, 180),
+    TITLE       = Color3.fromRGB(255, 255, 255),
+    ON          = Color3.fromRGB(80, 200, 120),
+    OFF         = Color3.fromRGB(200, 80, 80),
+    ON_BG       = Color3.fromRGB(30, 70, 40),
+    OFF_BG      = Color3.fromRGB(60, 30, 30),
+    SLIDER_BG   = Color3.fromRGB(40, 40, 60),
+    SLIDER_FILL = Color3.fromRGB(70, 100, 220),
+    BORDER      = Color3.fromRGB(50, 50, 75),
+}
+
+-- ─── STATE ───────────────────────────────────────────────
+local State = {
+    -- Aimbot
+    aimbot_enabled   = false,
+    silent_aim       = true,
+    fov_radius       = 150,
+    smoothness       = 5,
+    hit_chance       = 100,
+    max_distance     = 1000,
+    target_part      = "Head",
+    targeting        = "visible only",
+
+    -- Ragebot
+    ragebot_enabled  = false,
+    void_spam        = false,
+    rapid_fire       = false,
+    rapid_melee      = false,
+    fire_rate        = 10,
+    shoot_attempt    = 22,
+    orbit_enabled    = false,
+    orbit_height     = 50,
+    orbit_radius     = 12,
+
+    -- ESP
+    esp_enabled      = false,
+    esp_boxes        = true,
+    esp_names        = true,
+    esp_health       = true,
+    esp_tracers      = false,
+    esp_distance     = false,
+    esp_max_dist     = 500,
+    esp_color_enemy  = Color3.fromRGB(255, 60, 60),
+    esp_color_team   = Color3.fromRGB(60, 255, 60),
+
+    -- Weapon
+    no_spread        = true,
+    full_auto        = true,
+    always_backstab  = true,
+    triggerbot       = false,
+    triggerbot_delay = 5,
+    preferred_weapon = "primary",
+
+    -- Misc
+    fake_name         = false,
+    fake_name_text    = "AscendantGod",
+    ragemode          = false,
+    firerate          = 10,
+    watermark_visible = true,
+
+    -- Chat Spam
+    chat_spam        = false,
+    spam_message     = "Ascendant Hub on top 🔥",
+    spam_delay       = 5,
+}
+
+-- ─── CHAT SPAM ───────────────────────────────────────────
+local spamRunning = false
+local lastSpam    = 0
+
+local function sendChat(msg)
+    pcall(function()
+        -- Modern TextChatService path
+        local tcs = game:GetService("TextChatService")
+        if tcs and tcs.TextChannels then
+            local ch = tcs.TextChannels:FindFirstChild("RBXGeneral")
+            if ch then ch:SendAsync(msg) return end
+        end
+        -- Legacy chat remote fallback
+        local remote = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if remote then
+            local sayMsg = remote:FindFirstChild("SayMessageRequest")
+            if sayMsg then sayMsg:FireServer(msg, "All") return end
+        end
+    end)
+end
+
+local function startSpam()
+    if spamRunning then return end
+    spamRunning = true
+    lastSpam = tick()
+    coroutine.wrap(function()
+        while spamRunning and State.chat_spam do
+            if tick() - lastSpam >= State.spam_delay then
+                sendChat(State.spam_message)
+                lastSpam = tick()
+            end
+            task.wait(0.5)
+        end
+        spamRunning = false
+    end)()
+end
+
+local function stopSpam()
+    spamRunning = false
+end
+
+-- ─── AIMBOT SCAN ─────────────────────────────────────────
+local function buildTargets()
+    local targets = {}
+    local localChar = LocalPlayer.Character
+    if not localChar then return targets end
+    local localRoot = localChar:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return targets end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local char = player.Character
+        if not char then continue end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local head = char:FindFirstChild("Head")
+        if not hum or not hrp or not head then continue end
+        if hum.Health <= 0 then continue end
+
+        -- Team check (Rivals uses Teams service)
+        if LocalPlayer.Team and player.Team == LocalPlayer.Team then continue end
+
+        local dist = (hrp.Position - localRoot.Position).Magnitude
+        if dist > State.max_distance then continue end
+
+        -- Visibility raycast
+        local visible = false
+        local rayOrigin = Camera.CFrame.Position
+        local rayDir    = (head.Position - rayOrigin)
+        local result = workspace:Raycast(rayOrigin, rayDir,
+            RaycastParams.new())  -- simple; will hit terrain/parts before head if obstructed
+        if result and result.Instance then
+            local hit = result.Instance
+            visible = hit:IsDescendantOf(char)
+        end
+
+        if State.targeting == "visible only" and not visible then continue end
+
+        -- Screen position for FOV check
+        local screenPos, onScreen = Camera:WorldToScreenPoint(head.Position)
+        local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+
+        table.insert(targets, {
+            Player     = player,
+            Character  = char,
+            Position   = head.Position,
+            HRPPosition= hrp.Position,
+            Distance   = dist,
+            ScreenDist = screenDist,
+            Visible    = visible,
+            OnScreen   = onScreen,
+        })
+    end
+    return targets
+end
+
+local function selectTarget(targets)
+    local best = nil
+    for _, t in ipairs(targets) do
+        if t.ScreenDist > State.fov_radius then continue end
+        if not best or t.ScreenDist < best.ScreenDist then
+            best = t
+        end
+    end
+    return best
+end
+
+-- Silent aim: redirect bullet origin toward target head
+local currentTarget = nil
+
+RunService.RenderStepped:Connect(function(dt)
+    if not State.aimbot_enabled then
+        currentTarget = nil
+        return
+    end
+    if State.hit_chance < math.random(1, 100) then return end
+    local targets = buildTargets()
+    currentTarget = selectTarget(targets)
+end)
+
+-- ─── ESP ─────────────────────────────────────────────────
+-- Draws highlight boxes via SelectionBox — lightweight, no drawing lib needed
+local espObjects = {}
+
+local function clearESP()
+    for _, obj in pairs(espObjects) do
+        if obj and obj.Parent then obj:Destroy() end
+    end
+    espObjects = {}
+end
+
+local function updateESP()
+    clearESP()
+    if not State.esp_enabled then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local char = player.Character
+        if not char then continue end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+
+        local isTeam = LocalPlayer.Team and player.Team == LocalPlayer.Team
+        local col = isTeam and State.esp_color_team or State.esp_color_enemy
+
+        if State.esp_boxes then
+            local box = Instance.new("SelectionBox")
+            box.Color3         = col
+            box.LineThickness  = 0.04
+            box.SurfaceTransparency = 1
+            box.Adornee        = char
+            box.Parent         = workspace
+            table.insert(espObjects, box)
+        end
+
+        if State.esp_names or State.esp_health then
+            local bb = Instance.new("BillboardGui")
+            bb.AlwaysOnTop  = true
+            bb.Size         = UDim2.new(0, 100, 0, 40)
+            bb.StudsOffset  = Vector3.new(0, 3, 0)
+            bb.Adornee      = char:FindFirstChild("Head") or char.PrimaryPart
+            bb.Parent       = workspace
+
+            if State.esp_names then
+                local nl = Instance.new("TextLabel")
+                nl.Size                 = UDim2.new(1, 0, 0.5, 0)
+                nl.BackgroundTransparency = 1
+                nl.Text                 = player.Name
+                nl.TextColor3           = col
+                nl.TextScaled           = true
+                nl.Font                 = Enum.Font.GothamBold
+                nl.Parent               = bb
+            end
+
+            if State.esp_health then
+                local hl = Instance.new("TextLabel")
+                hl.Size                 = UDim2.new(1, 0, 0.5, 0)
+                hl.Position             = UDim2.new(0, 0, 0.5, 0)
+                hl.BackgroundTransparency = 1
+                hl.Text                 = math.floor(hum.Health) .. " HP"
+                hl.TextColor3           = Color3.fromRGB(100, 255, 100)
+                hl.TextScaled           = true
+                hl.Font                 = Enum.Font.Gotham
+                hl.Parent               = bb
+            end
+
+            table.insert(espObjects, bb)
+        end
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    updateESP()
+end)
+
+-- ─── FAKE NAME ───────────────────────────────────────────
+-- Overrides the nametag BillboardGui that Roblox injects above character
+local function applyFakeName()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+    for _, obj in ipairs(head:GetChildren()) do
+        if obj:IsA("BillboardGui") then
+            local nl = obj:FindFirstChildOfClass("TextLabel")
+            if nl then
+                nl.Text = State.fake_name and State.fake_name_text or LocalPlayer.Name
+            end
+        end
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    if State.fake_name then applyFakeName() end
+end)
+
+-- ─── WEAPON HELPERS ──────────────────────────────────────
+local function getEquippedTool()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, v in ipairs(char:GetChildren()) do
+        if v:IsA("Tool") then return v end
+    end
+    return nil
+end
+
+-- ─── GUI ─────────────────────────────────────────────────
+-- Destroy any old GUI first (re-exec safety)
+local old = LocalPlayer:FindFirstChild("PlayerGui") and
+            LocalPlayer.PlayerGui:FindFirstChild("AscendantHub")
+if old then old:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name            = "AscendantHub"
+ScreenGui.ResetOnSpawn    = false
+ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder    = 999
+ScreenGui.IgnoreGuiInset  = true
+ScreenGui.Parent          = LocalPlayer.PlayerGui
+
+-- ── Main window ──────────────────────────────────────────
+local Main = Instance.new("Frame")
+Main.Name             = "Main"
+Main.Size             = UDim2.new(0, 420, 0, 340)
+Main.Position         = UDim2.new(0.5, -210, 0.5, -170)
+Main.BackgroundColor3 = THEME.BG
+Main.BorderSizePixel  = 0
+Main.Parent           = ScreenGui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+-- border stroke
+local stroke = Instance.new("UIStroke")
+stroke.Color     = THEME.BORDER
+stroke.Thickness = 1.2
+stroke.Parent    = Main
+
+-- ── Title bar ────────────────────────────────────────────
+local TitleBar = Instance.new("Frame")
+TitleBar.Name             = "TitleBar"
+TitleBar.Size             = UDim2.new(1, 0, 0, 36)
+TitleBar.BackgroundColor3 = THEME.PANEL
+TitleBar.BorderSizePixel  = 0
+TitleBar.Parent           = Main
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
+
+-- patch bottom corners of titlebar
+local tbPatch = Instance.new("Frame")
+tbPatch.Size             = UDim2.new(1, 0, 0, 18)
+tbPatch.Position         = UDim2.new(0, 0, 1, -18)
+tbPatch.BackgroundColor3 = THEME.PANEL
+tbPatch.BorderSizePixel  = 0
+tbPatch.Parent           = TitleBar
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size               = UDim2.new(1, -80, 1, 0)
+TitleLabel.Position           = UDim2.new(0, 12, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text               = "Ascendant Hub v1.0"
+TitleLabel.TextColor3         = THEME.TITLE
+TitleLabel.TextSize           = 15
+TitleLabel.Font               = Enum.Font.GothamBold
+TitleLabel.TextXAlignment     = Enum.TextXAlignment.Left
+TitleLabel.Parent             = TitleBar
+
+-- ── Watermark bar (draggable, closeable) ─────────────────
+local Watermark = Instance.new("Frame")
+Watermark.Name             = "Watermark"
+Watermark.Size             = UDim2.new(0, 360, 0, 26)
+Watermark.Position         = UDim2.new(0, 6, 1, -36)
+Watermark.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
+Watermark.BorderSizePixel  = 0
+Watermark.ClipsDescendants = false
+Watermark.Parent           = ScreenGui
+Instance.new("UICorner", Watermark).CornerRadius = UDim.new(0, 6)
+
+local wmStroke = Instance.new("UIStroke")
+wmStroke.Color     = THEME.BORDER
+wmStroke.Thickness = 1
+wmStroke.Parent    = Watermark
+
+local WatermarkLabel = Instance.new("TextLabel")
+WatermarkLabel.Size               = UDim2.new(1, -32, 1, 0)
+WatermarkLabel.Position           = UDim2.new(0, 8, 0, 0)
+WatermarkLabel.BackgroundTransparency = 1
+WatermarkLabel.Text               = "Ascendant Hub | V1.0 (Beta) | Free | 60 fps | 0 ms"
+WatermarkLabel.TextColor3         = THEME.TEXT
+WatermarkLabel.TextSize           = 12
+WatermarkLabel.Font               = Enum.Font.GothamMedium
+WatermarkLabel.TextXAlignment     = Enum.TextXAlignment.Left
+WatermarkLabel.Parent             = Watermark
+
+-- X button on the watermark
+local WmClose = Instance.new("TextButton")
+WmClose.Size             = UDim2.new(0, 20, 0, 20)
+WmClose.Position         = UDim2.new(1, -23, 0.5, -10)
+WmClose.BackgroundColor3 = Color3.fromRGB(160, 50, 50)
+WmClose.BorderSizePixel  = 0
+WmClose.Text             = "✕"
+WmClose.TextColor3       = Color3.fromRGB(255, 255, 255)
+WmClose.TextSize         = 11
+WmClose.Font             = Enum.Font.GothamBold
+WmClose.Parent           = Watermark
+Instance.new("UICorner", WmClose).CornerRadius = UDim.new(0, 4)
+
+WmClose.MouseButton1Click:Connect(function()
+    Watermark.Visible = false
+    State.watermark_visible = false
+end)
+
+-- Drag on the watermark itself
+do
+    local wmDragging, wmDragStart, wmStartPos = false, nil, nil
+    Watermark.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            wmDragging  = true
+            wmDragStart = inp.Position
+            wmStartPos  = Watermark.Position
+        end
+    end)
+    Watermark.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            wmDragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if wmDragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+        or inp.UserInputType == Enum.UserInputType.Touch) then
+            local d = inp.Position - wmDragStart
+            Watermark.Position = UDim2.new(
+                wmStartPos.X.Scale, wmStartPos.X.Offset + d.X,
+                wmStartPos.Y.Scale, wmStartPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+local lastFPSUpdate = 0
+local frameCount    = 0
+RunService.RenderStepped:Connect(function()
+    frameCount += 1
+    if tick() - lastFPSUpdate >= 1 then
+        local ping = LocalPlayer:GetNetworkPing and math.floor(LocalPlayer:GetNetworkPing() * 1000) or 0
+        WatermarkLabel.Text = "Ascendant Hub | V1.0 (Beta) | Free | " .. frameCount .. " fps | " .. ping .. " ms"
+        frameCount    = 0
+        lastFPSUpdate = tick()
+    end
+end)
+
+-- Close button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size             = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position         = UDim2.new(1, -32, 0, 4)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+CloseBtn.BorderSizePixel  = 0
+CloseBtn.Text             = "✕"
+CloseBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize         = 14
+CloseBtn.Font             = Enum.Font.GothamBold
+CloseBtn.Parent           = TitleBar
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+CloseBtn.MouseButton1Click:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+-- Drag
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    TitleBar.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = inp.Position
+            startPos  = Main.Position
+        end
+    end)
+    TitleBar.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+            or inp.UserInputType == Enum.UserInputType.Touch) then
+            local d = inp.Position - dragStart
+            Main.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- ── Tab bar ──────────────────────────────────────────────
+local TAB_NAMES = {"Main", "ESP", "Visual", "Misc", "Chat Spam", "Keybinds"}
+
+local TabBar = Instance.new("Frame")
+TabBar.Name             = "TabBar"
+TabBar.Size             = UDim2.new(1, 0, 0, 32)
+TabBar.Position         = UDim2.new(0, 0, 0, 36)
+TabBar.BackgroundColor3 = THEME.PANEL
+TabBar.BorderSizePixel  = 0
+TabBar.Parent           = Main
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.SortOrder     = Enum.SortOrder.LayoutOrder
+TabLayout.Padding       = UDim.new(0, 2)
+TabLayout.Parent        = TabBar
+
+-- ── Content area ─────────────────────────────────────────
+local ContentArea = Instance.new("Frame")
+ContentArea.Name             = "ContentArea"
+ContentArea.Size             = UDim2.new(1, 0, 1, -68)
+ContentArea.Position         = UDim2.new(0, 0, 0, 68)
+ContentArea.BackgroundColor3 = THEME.BG
+ContentArea.BorderSizePixel  = 0
+ContentArea.Parent           = Main
+
+-- ── Helper: make a scrolling tab page ────────────────────
+local tabPages = {}
+local tabButtons = {}
+
+local function makePage(name)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Name                    = name
+    scroll.Size                    = UDim2.new(1, 0, 1, 0)
+    scroll.BackgroundTransparency  = 1
+    scroll.BorderSizePixel         = 0
+    scroll.ScrollBarThickness      = 3
+    scroll.ScrollBarImageColor3    = THEME.ACCENT
+    scroll.CanvasSize              = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize     = Enum.AutomaticSize.Y
+    scroll.Visible                 = false
+    scroll.Parent                  = ContentArea
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft   = UDim.new(0, 8)
+    pad.PaddingRight  = UDim.new(0, 8)
+    pad.PaddingTop    = UDim.new(0, 6)
+    pad.PaddingBottom = UDim.new(0, 6)
+    pad.Parent        = scroll
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder     = Enum.SortOrder.LayoutOrder
+    layout.Padding       = UDim.new(0, 6)
+    layout.Parent        = scroll
+
+    tabPages[name] = scroll
+    return scroll
+end
+
+local currentTab = nil
+
+local function switchTab(name)
+    for _, page in pairs(tabPages) do page.Visible = false end
+    for _, btn in pairs(tabButtons) do
+        btn.BackgroundColor3 = THEME.TAB_IDLE
+        btn.TextColor3       = THEME.SUBTEXT
+    end
+    if tabPages[name] then tabPages[name].Visible = true end
+    if tabButtons[name] then
+        tabButtons[name].BackgroundColor3 = THEME.TAB_ACTIVE
+        tabButtons[name].TextColor3       = THEME.TITLE
+    end
+    currentTab = name
+end
+
+-- Build tab buttons
+for i, name in ipairs(TAB_NAMES) do
+    local btn = Instance.new("TextButton")
+    btn.Name             = name
+    btn.Size             = UDim2.new(0, 62, 1, 0)
+    btn.BackgroundColor3 = THEME.TAB_IDLE
+    btn.BorderSizePixel  = 0
+    btn.Text             = name
+    btn.TextColor3       = THEME.SUBTEXT
+    btn.TextSize         = 11
+    btn.Font             = Enum.Font.GothamMedium
+    btn.LayoutOrder      = i
+    btn.Parent           = TabBar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    makePage(name)
+    tabButtons[name] = btn
+
+    btn.MouseButton1Click:Connect(function()
+        switchTab(name)
+    end)
+end
+
+-- ── GUI Components ───────────────────────────────────────
+-- Section header
+local function makeSection(parent, title, order)
+    local f = Instance.new("Frame")
+    f.Name             = title
+    f.Size             = UDim2.new(1, 0, 0, 26)
+    f.BackgroundColor3 = THEME.SECTION
+    f.BorderSizePixel  = 0
+    f.LayoutOrder      = order or 1
+    f.AutomaticSize    = Enum.AutomaticSize.Y
+    f.Parent           = parent
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+
+    local lyt = Instance.new("UIListLayout")
+    lyt.SortOrder = Enum.SortOrder.LayoutOrder
+    lyt.Padding   = UDim.new(0, 4)
+    lyt.Parent    = f
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft   = UDim.new(0, 8)
+    pad.PaddingRight  = UDim.new(0, 8)
+    pad.PaddingTop    = UDim.new(0, 4)
+    pad.PaddingBottom = UDim.new(0, 6)
+    pad.Parent        = f
+
+    local hdr = Instance.new("TextLabel")
+    hdr.Size               = UDim2.new(1, 0, 0, 22)
+    hdr.BackgroundTransparency = 1
+    hdr.Text               = title
+    hdr.TextColor3         = THEME.ACCENT
+    hdr.TextSize           = 13
+    hdr.Font               = Enum.Font.GothamBold
+    hdr.TextXAlignment     = Enum.TextXAlignment.Left
+    hdr.LayoutOrder        = 0
+    hdr.Parent             = f
+
+    return f
+end
+
+-- Toggle row
+local function makeToggle(parent, label, stateKey, order, callback)
+    local row = Instance.new("Frame")
+    row.Size             = UDim2.new(1, 0, 0, 28)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder      = order or 1
+    row.Parent           = parent
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, -58, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = label
+    lbl.TextColor3         = THEME.TEXT
+    lbl.TextSize           = 13
+    lbl.Font               = Enum.Font.Gotham
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.Parent             = row
+
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 50, 0, 22)
+    btn.Position         = UDim2.new(1, -50, 0.5, -11)
+    btn.BackgroundColor3 = State[stateKey] and THEME.ON_BG or THEME.OFF_BG
+    btn.BorderSizePixel  = 0
+    btn.Text             = State[stateKey] and "ON" or "OFF"
+    btn.TextColor3       = State[stateKey] and THEME.ON or THEME.OFF
+    btn.TextSize         = 12
+    btn.Font             = Enum.Font.GothamBold
+    btn.Parent           = row
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    btn.MouseButton1Click:Connect(function()
+        State[stateKey] = not State[stateKey]
+        btn.Text             = State[stateKey] and "ON" or "OFF"
+        btn.TextColor3       = State[stateKey] and THEME.ON or THEME.OFF
+        btn.BackgroundColor3 = State[stateKey] and THEME.ON_BG or THEME.OFF_BG
+        if callback then callback(State[stateKey]) end
+    end)
+
+    return row
+end
+
+-- Slider row (mobile touch-compatible)
+local function makeSlider(parent, label, stateKey, minVal, maxVal, order, callback)
+    local row = Instance.new("Frame")
+    row.Size             = UDim2.new(1, 0, 0, 44)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder      = order or 1
+    row.Parent           = parent
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, 0, 0, 18)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = label .. ": " .. tostring(State[stateKey])
+    lbl.TextColor3         = THEME.TEXT
+    lbl.TextSize           = 12
+    lbl.Font               = Enum.Font.Gotham
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.Parent             = row
+
+    local track = Instance.new("Frame")
+    track.Size             = UDim2.new(1, 0, 0, 14)
+    track.Position         = UDim2.new(0, 0, 0, 20)
+    track.BackgroundColor3 = THEME.SLIDER_BG
+    track.BorderSizePixel  = 0
+    track.Parent           = row
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 7)
+
+    local fill = Instance.new("Frame")
+    local pct  = (State[stateKey] - minVal) / (maxVal - minVal)
+    fill.Size             = UDim2.new(pct, 0, 1, 0)
+    fill.BackgroundColor3 = THEME.SLIDER_FILL
+    fill.BorderSizePixel  = 0
+    fill.Parent           = track
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 7)
+
+    local dragging = false
+
+    local function updateSlider(inputPos)
+        local trackPos  = track.AbsolutePosition
+        local trackSize = track.AbsoluteSize
+        local rel = math.clamp((inputPos.X - trackPos.X) / trackSize.X, 0, 1)
+        local val = math.floor(minVal + rel * (maxVal - minVal))
+        State[stateKey]  = val
+        fill.Size        = UDim2.new(rel, 0, 1, 0)
+        lbl.Text         = label .. ": " .. tostring(val)
+        if callback then callback(val) end
+    end
+
+    track.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateSlider(inp.Position)
+        end
+    end)
+    track.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1
+        or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+        or inp.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(inp.Position)
+        end
+    end)
+
+    return row
+end
+
+-- TextBox row
+local function makeTextbox(parent, label, stateKey, order, callback)
+    local row = Instance.new("Frame")
+    row.Size             = UDim2.new(1, 0, 0, 46)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder      = order or 1
+    row.Parent           = parent
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, 0, 0, 18)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = label
+    lbl.TextColor3         = THEME.SUBTEXT
+    lbl.TextSize           = 12
+    lbl.Font               = Enum.Font.Gotham
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.Parent             = row
+
+    local box = Instance.new("TextBox")
+    box.Size             = UDim2.new(1, 0, 0, 26)
+    box.Position         = UDim2.new(0, 0, 0, 20)
+    box.BackgroundColor3 = THEME.SECTION
+    box.BorderSizePixel  = 0
+    box.Text             = State[stateKey]
+    box.TextColor3       = THEME.TEXT
+    box.TextSize         = 13
+    box.Font             = Enum.Font.Gotham
+    box.ClearTextOnFocus = false
+    box.Parent           = row
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 5)
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 6)
+    pad.Parent      = box
+
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        State[stateKey] = box.Text
+        if callback then callback(box.Text) end
+    end)
+
+    return row
+end
+
+-- ── TAB: Main ────────────────────────────────────────────
+do
+    local page = tabPages["Main"]
+
+    local aimSec = makeSection(page, "Aimbot", 1)
+    makeToggle(aimSec, "Enable Aimbot",   "aimbot_enabled", 1)
+    makeToggle(aimSec, "Silent Aim",      "silent_aim",     2)
+    makeSlider(aimSec, "FOV Radius",      "fov_radius",     50, 300, 3)
+    makeSlider(aimSec, "Smoothness",      "smoothness",     1, 20,  4)
+    makeSlider(aimSec, "Hit Chance (%)",  "hit_chance",     1, 100, 5)
+    makeSlider(aimSec, "Max Distance",    "max_distance",   100, 2000, 6)
+
+    local rageSec = makeSection(page, "Ragebot", 2)
+    makeToggle(rageSec, "Enable Ragebot",  "ragebot_enabled", 1)
+    makeToggle(rageSec, "Void Spam",       "void_spam",       2)
+    makeToggle(rageSec, "Rapid Fire",      "rapid_fire",      3)
+    makeToggle(rageSec, "Rapid Melee",     "rapid_melee",     4)
+    makeSlider(rageSec, "Fire Rate",       "fire_rate",       1, 100, 5)
+    makeSlider(rageSec, "Shoot Attempt",   "shoot_attempt",   1, 50,  6)
+
+    local wepSec = makeSection(page, "Weapon", 3)
+    makeToggle(wepSec, "No Spread",        "no_spread",       1)
+    makeToggle(wepSec, "Full Auto",        "full_auto",       2)
+    makeToggle(wepSec, "Always Backstab",  "always_backstab", 3)
+    makeToggle(wepSec, "Triggerbot",       "triggerbot",      4)
+    makeSlider(wepSec, "Triggerbot Delay", "triggerbot_delay",1, 50,  5)
+end
+
+-- ── TAB: ESP ─────────────────────────────────────────────
+do
+    local page = tabPages["ESP"]
+
+    local espSec = makeSection(page, "ESP Settings", 1)
+    makeToggle(espSec, "Enable ESP",     "esp_enabled",  1)
+    makeToggle(espSec, "Boxes",          "esp_boxes",    2)
+    makeToggle(espSec, "Names",          "esp_names",    3)
+    makeToggle(espSec, "Health",         "esp_health",   4)
+    makeToggle(espSec, "Tracers",        "esp_tracers",  5)
+    makeToggle(espSec, "Show Distance",  "esp_distance", 6)
+    makeSlider(espSec, "Max ESP Dist",   "esp_max_dist", 50, 1000, 7)
+end
+
+-- ── TAB: Visual ──────────────────────────────────────────
+do
+    local page = tabPages["Visual"]
+
+    local orbitSec = makeSection(page, "Orbit", 1)
+    makeToggle(orbitSec, "Enable Orbit",  "orbit_enabled", 1)
+    makeSlider(orbitSec, "Orbit Height",  "orbit_height",  0, 100, 2)
+    makeSlider(orbitSec, "Orbit Radius",  "orbit_radius",  0, 30,  3)
+end
+
+-- ── TAB: Misc ────────────────────────────────────────────
+do
+    local page = tabPages["Misc"]
+
+    local miscSec = makeSection(page, "Miscellaneous", 1)
+    makeToggle(miscSec, "Ragemode",   "ragemode",  1)
+    makeSlider(miscSec, "Fire Rate",  "firerate",  1, 100, 2)
+    makeToggle(miscSec, "Watermark",  "watermark_visible", 3, function(v)
+        Watermark.Visible = v
+    end)
+
+    local nameSec = makeSection(page, "Fake Name", 2)
+    makeToggle(nameSec,  "Enable Fake Name", "fake_name",      1)
+    makeTextbox(nameSec, "Fake Name",        "fake_name_text", 2)
+end
+
+-- ── TAB: Chat Spam ───────────────────────────────────────
+do
+    local page = tabPages["Chat Spam"]
+
+    local spamSec = makeSection(page, "Chat Spam 2026", 1)
+    makeToggle(spamSec, "Enable Chat Spam", "chat_spam", 1, function(v)
+        if v then startSpam() else stopSpam() end
+    end)
+    makeTextbox(spamSec, "Spam Message", "spam_message", 2)
+    makeSlider(spamSec,  "Spam Delay (seconds)", "spam_delay", 1, 120, 3)
+end
+
+-- ── TAB: Keybinds ────────────────────────────────────────
+do
+    local page = tabPages["Keybinds"]
+
+    local kbSec = makeSection(page, "Keybinds", 1)
+
+    local binds = {
+        {"Toggle GUI",       "Insert"},
+        {"Toggle Aimbot",    "Right Shift"},
+        {"Toggle Ragebot",   "Right Ctrl"},
+        {"Toggle Chat Spam", "F8"},
+        {"Toggle ESP",       "F9"},
+    }
+
+    for i, bind in ipairs(binds) do
+        local row = Instance.new("Frame")
+        row.Size             = UDim2.new(1, 0, 0, 26)
+        row.BackgroundTransparency = 1
+        row.LayoutOrder      = i
+        row.Parent           = kbSec
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size               = UDim2.new(0.6, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text               = bind[1]
+        lbl.TextColor3         = THEME.TEXT
+        lbl.TextSize           = 13
+        lbl.Font               = Enum.Font.Gotham
+        lbl.TextXAlignment     = Enum.TextXAlignment.Left
+        lbl.Parent             = row
+
+        local key = Instance.new("TextLabel")
+        key.Size             = UDim2.new(0, 90, 0, 22)
+        key.Position         = UDim2.new(1, -90, 0.5, -11)
+        key.BackgroundColor3 = THEME.TAB_ACTIVE
+        key.BorderSizePixel  = 0
+        key.Text             = bind[2]
+        key.TextColor3       = Color3.fromRGB(255, 220, 80)
+        key.TextSize         = 12
+        key.Font             = Enum.Font.GothamBold
+        key.Parent           = row
+        Instance.new("UICorner", key).CornerRadius = UDim.new(0, 5)
+    end
+end
+
+-- ─── KEYBINDS ─────────────────────────────────────────────
+UserInputService.InputBegan:Connect(function(inp, gp)
+    if gp then return end
+    if inp.KeyCode == Enum.KeyCode.Insert then
+        Main.Visible = not Main.Visible
+    elseif inp.KeyCode == Enum.KeyCode.RightShift then
+        State.aimbot_enabled = not State.aimbot_enabled
+        print("[AscendantHub] Aimbot: " .. tostring(State.aimbot_enabled))
+    elseif inp.KeyCode == Enum.KeyCode.RightControl then
+        State.ragebot_enabled = not State.ragebot_enabled
+        print("[AscendantHub] Ragebot: " .. tostring(State.ragebot_enabled))
+    elseif inp.KeyCode == Enum.KeyCode.F8 then
+        State.chat_spam = not State.chat_spam
+        if State.chat_spam then startSpam() else stopSpam() end
+        print("[AscendantHub] Chat Spam: " .. tostring(State.chat_spam))
+    elseif inp.KeyCode == Enum.KeyCode.F9 then
+        State.esp_enabled = not State.esp_enabled
+        print("[AscendantHub] ESP: " .. tostring(State.esp_enabled))
+    end
+end)
+
+-- ─── BOOT ─────────────────────────────────────────────────
+switchTab("Main")
+
+print("╔══════════════════════════════╗")
+print("║  Ascendant Hub v1.0 Loaded   ║")
+print("║  Insert  → Toggle GUI        ║")
+print("║  R.Shift → Toggle Aimbot     ║")
+print("║  R.Ctrl  → Toggle Ragebot    ║")
+print("║  F8      → Toggle Chat Spam  ║")
+print("║  F9      → Toggle ESP        ║")
+print("╚══════════════════════════════╝")
