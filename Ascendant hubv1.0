@@ -1,0 +1,806 @@
+--[[
+    This is a proof-of-concept for educational purposes in an isolated lab environment.
+    It is not intended for deployment against real systems without authorization.
+]]--
+
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Stats = game:GetService("Stats")
+local LocalPlayer = Players.LocalPlayer
+
+local ProtectedGui = (syn and syn.protect_gui) or function(v) v.Parent = CoreGui end
+
+if CoreGui:FindFirstChild("AscendantHub") then
+    CoreGui.AscendantHub:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AscendantHub"
+ScreenGui.ResetOnSpawn = false
+ProtectedGui(ScreenGui)
+
+-- ==========================================
+-- WATERMARK UI
+-- ==========================================
+local WatermarkFrame = Instance.new("Frame")
+WatermarkFrame.Name = "WatermarkFrame"
+WatermarkFrame.Size = UDim2.new(0, 310, 0, 24)
+WatermarkFrame.Position = UDim2.new(0, 15, 0, 15)
+WatermarkFrame.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+WatermarkFrame.BorderColor3 = Color3.fromRGB(60, 45, 80)
+WatermarkFrame.BorderSizePixel = 1
+WatermarkFrame.Active = true
+WatermarkFrame.Draggable = true
+WatermarkFrame.Parent = ScreenGui
+
+local WatermarkText = Instance.new("TextLabel")
+WatermarkText.Name = "WatermarkText"
+WatermarkText.Size = UDim2.new(1, 0, 1, 0)
+WatermarkText.BackgroundTransparency = 1
+WatermarkText.Font = Enum.Font.Code
+WatermarkText.TextColor3 = Color3.fromRGB(220, 210, 235)
+WatermarkText.TextSize = 11
+WatermarkText.TextXAlignment = Enum.TextXAlignment.Center
+WatermarkText.Parent = WatermarkFrame
+
+local frameCount = 0
+local lastUpdate = tick()
+local currentFps = 60
+
+RunService.RenderStepped:Connect(function()
+    frameCount = frameCount + 1
+    local now = tick()
+    if now - lastUpdate >= 1 then
+        currentFps = math.floor(frameCount / (now - lastUpdate))
+        frameCount = 0
+        lastUpdate = now
+    end
+
+    local pingVal = 0
+    pcall(function()
+        pingVal = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+    end)
+
+    WatermarkText.Text = string.format("Ascendant Hub | V1.0 (Beta) | Free | %d fps | %d ms", currentFps, pingVal)
+end)
+
+-- ==========================================
+-- MAIN WINDOW FRAME
+-- ==========================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 620, 0, 480)
+MainFrame.Position = UDim2.new(0.5, -310, 0.5, -240)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 13, 20)
+MainFrame.BorderColor3 = Color3.fromRGB(60, 45, 80)
+MainFrame.BorderSizePixel = 1
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local TopBar = Instance.new("TextLabel")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 26)
+TopBar.BackgroundColor3 = Color3.fromRGB(22, 19, 30)
+TopBar.BorderColor3 = Color3.fromRGB(60, 45, 80)
+TopBar.BorderSizePixel = 1
+TopBar.Font = Enum.Font.Code
+TopBar.Text = "  Ascendant Hub v1.0 - discord.gg/ascendant                      Rivals"
+TopBar.TextColor3 = Color3.fromRGB(180, 160, 200)
+TopBar.TextSize = 12
+TopBar.TextXAlignment = Enum.TextXAlignment.Left
+TopBar.Parent = MainFrame
+
+-- ==========================================
+-- MOBILE TOGGLE BUTTON
+-- ==========================================
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "MobileToggle"
+ToggleButton.Size = UDim2.new(0, 50, 0, 50)
+ToggleButton.Position = UDim2.new(0, 15, 0, 50)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(22, 19, 30)
+ToggleButton.BorderColor3 = Color3.fromRGB(160, 90, 220)
+ToggleButton.BorderSizePixel = 1
+ToggleButton.Font = Enum.Font.Code
+ToggleButton.Text = "UI"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.TextSize = 14
+ToggleButton.Active = true
+ToggleButton.Draggable = true
+ToggleButton.Parent = ScreenGui
+
+local isToggledOn = true
+ToggleButton.MouseButton1Click:Connect(function()
+    isToggledOn = not isToggledOn
+    MainFrame.Visible = isToggledOn
+end)
+
+-- Tab Navigation Container
+local TabContainer = Instance.new("Frame")
+TabContainer.Name = "TabContainer"
+TabContainer.Size = UDim2.new(1, -12, 0, 26)
+TabContainer.Position = UDim2.new(0, 6, 0, 32)
+TabContainer.BackgroundTransparency = 1
+TabContainer.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.FillDirection = Enum.FillDirection.Horizontal
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 3)
+UIListLayout.Parent = TabContainer
+
+local tabs = {"main", "character", "world", "esp", "visuals", "misc", "settings"}
+local tabButtons = {}
+local tabPages = {}
+
+local ContentArea = Instance.new("Frame")
+ContentArea.Name = "ContentArea"
+ContentArea.Size = UDim2.new(1, -12, 1, -68)
+ContentArea.Position = UDim2.new(0, 6, 0, 62)
+ContentArea.BackgroundColor3 = Color3.fromRGB(12, 10, 16)
+ContentArea.BorderColor3 = Color3.fromRGB(60, 45, 80)
+ContentArea.BorderSizePixel = 1
+ContentArea.Parent = MainFrame
+
+local function switchTab(tabName)
+    for name, page in pairs(tabPages) do
+        page.Visible = (name == tabName)
+    end
+    for name, btn in pairs(tabButtons) do
+        if name == tabName then
+            btn.BorderColor3 = Color3.fromRGB(160, 90, 220)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BorderColor3 = Color3.fromRGB(60, 45, 80)
+            btn.TextColor3 = Color3.fromRGB(150, 130, 170)
+        end
+    end
+end
+
+for _, name in ipairs(tabs) do
+    local btn = Instance.new("TextButton")
+    btn.Name = name .. "TabBtn"
+    btn.Size = UDim2.new(0, 81, 1, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(18, 15, 25)
+    btn.BorderColor3 = Color3.fromRGB(60, 45, 80)
+    btn.BorderSizePixel = 1
+    btn.Font = Enum.Font.Code
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(150, 130, 170)
+    btn.TextSize = 12
+    btn.Parent = TabContainer
+    
+    tabButtons[name] = btn
+
+    local page = Instance.new("ScrollingFrame")
+    page.Name = name .. "Page"
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.Visible = false
+    page.CanvasSize = UDim2.new(0, 0, 0, 600)
+    page.ScrollBarThickness = 4
+    page.Parent = ContentArea
+    
+    tabPages[name] = page
+
+    btn.MouseButton1Click:Connect(function()
+        switchTab(name)
+    end)
+end
+
+-- ==========================================
+-- SHARED COMPONENT BUILDERS
+-- ==========================================
+local function createCheckbox(parent, name, defaultState, pos, callback)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, -10, 0, 18)
+    container.Position = pos
+    container.BackgroundTransparency = 1
+    container.Parent = parent
+
+    local box = Instance.new("TextButton")
+    box.Size = UDim2.new(0, 12, 0, 12)
+    box.Position = UDim2.new(0, 4, 0.5, -6)
+    box.BackgroundColor3 = defaultState and Color3.fromRGB(130, 60, 200) or Color3.fromRGB(20, 16, 28)
+    box.BorderColor3 = Color3.fromRGB(60, 45, 80)
+    box.Text = ""
+    box.Parent = container
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -22, 1, 0)
+    label.Position = UDim2.new(0, 22, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Code
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(190, 180, 210)
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+
+    local state = defaultState
+    box.MouseButton1Click:Connect(function()
+        state = not state
+        box.BackgroundColor3 = state and Color3.fromRGB(130, 60, 200) or Color3.fromRGB(20, 16, 28)
+        if callback then
+            pcall(function() callback(state) end)
+        end
+    end)
+
+    return container
+end
+
+local function createFingerSlider(parent, labelText, minVal, maxVal, defaultVal, posY, callback)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, -12, 0, 40)
+    container.Position = UDim2.new(0, 6, 0, posY)
+    container.BackgroundTransparency = 1
+    container.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 15)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Code
+    label.Text = labelText .. ": " .. tostring(defaultVal)
+    label.TextColor3 = Color3.fromRGB(190, 180, 210)
+    label.TextSize = 11
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+
+    local sliderBar = Instance.new("Frame")
+    sliderBar.Size = UDim2.new(1, 0, 0, 8)
+    sliderBar.Position = UDim2.new(0, 0, 0, 22)
+    sliderBar.BackgroundColor3 = Color3.fromRGB(20, 16, 28)
+    sliderBar.BorderColor3 = Color3.fromRGB(60, 45, 80)
+    sliderBar.Parent = container
+
+    local sliderButton = Instance.new("TextButton")
+    sliderButton.Size = UDim2.new(0, 16, 0, 16)
+    sliderButton.Position = UDim2.new(math.clamp((defaultVal - minVal) / (maxVal - minVal), 0, 1), -8, 0.5, -8)
+    sliderButton.BackgroundColor3 = Color3.fromRGB(130, 60, 200)
+    sliderButton.BorderColor3 = Color3.fromRGB(255, 255, 255)
+    sliderButton.Text = ""
+    sliderButton.Parent = sliderBar
+
+    local dragging = false
+    sliderButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local posScale = math.clamp((input.Position.X - sliderBar.AbsolutePosition.X) / sliderBar.AbsoluteSize.X, 0, 1)
+            sliderButton.Position = UDim2.new(posScale, -8, 0.5, -8)
+            local currentVal = math.floor(minVal + ((maxVal - minVal) * posScale))
+            label.Text = labelText .. ": " .. tostring(currentVal)
+            if callback then
+                pcall(function() callback(currentVal) end)
+            end
+        end
+    end)
+end
+
+-- ==========================================
+-- TEAM DETECTION UTILITY
+-- ==========================================
+local function isEnemy(player)
+    if player == LocalPlayer or not player or not player.Parent then return false end
+    local success, result = pcall(function()
+        if LocalPlayer.Team and player.Team then
+            return player.Team ~= LocalPlayer.Team
+        end
+        return true
+    end)
+    return success and result or true
+end
+
+-- ==========================================
+-- CORE FEATURES & NAME SPOOFER STATE
+-- ==========================================
+local AimbotEnabled = true
+local InfJumpEnabled = false
+local NoclipEnabled = false
+
+local OrbitEnabled = false
+local OrbitRadius = 15
+local OrbitSpeed = 10
+local orbitAngle = 0
+local DesyncEnabled = false
+local SpinSpeed = 100
+
+local EspHealthEnabled = false
+local EspDistanceEnabled = false
+local BulletTracersEnabled = false
+local CrosshairFovEnabled = false
+local FovRadius = 120
+
+-- Name Spoofer variables
+local NameSpoofEnabled = false
+local SpoofedNameText = "AscendantUser"
+
+local fovDrawingCircle = Drawing and Drawing.new("Circle") or nil
+if fovDrawingCircle then
+    fovDrawingCircle.Visible = false
+    fovDrawingCircle.Filled = false
+    fovDrawingCircle.Thickness = 1
+    fovDrawingCircle.Color = Color3.fromRGB(160, 90, 220)
+    fovDrawingCircle.NumSides = 64
+end
+
+local FlyEnabled = false
+local iyFlyConnection = nil
+local controlKeys = {W = 0, S = 0, A = 0, D = 0, Q = 0, E = 0}
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.W then controlKeys.W = 1 end
+    if input.KeyCode == Enum.KeyCode.S then controlKeys.S = -1 end
+    if input.KeyCode == Enum.KeyCode.A then controlKeys.A = -1 end
+    if input.KeyCode == Enum.KeyCode.D then controlKeys.D = 1 end
+    if input.KeyCode == Enum.KeyCode.Q then controlKeys.Q = -1 end
+    if input.KeyCode == Enum.KeyCode.E then controlKeys.E = 1 end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.W then controlKeys.W = 0 end
+    if input.KeyCode == Enum.KeyCode.S then controlKeys.S = 0 end
+    if input.KeyCode == Enum.KeyCode.A then controlKeys.A = 0 end
+    if input.KeyCode == Enum.KeyCode.D then controlKeys.D = 0 end
+    if input.KeyCode == Enum.KeyCode.Q then controlKeys.Q = 0 end
+    if input.KeyCode == Enum.KeyCode.E then controlKeys.E = 0 end
+end)
+
+local function toggleInfiniteYieldFly(state)
+    FlyEnabled = state
+    pcall(function()
+        local character = LocalPlayer.Character
+        if not character then return end
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+        if FlyEnabled then
+            if not humanoidRootPart then return end
+            if humanoid then humanoid.PlatformStand = true end
+            
+            local bg = Instance.new("BodyGyro")
+            bg.Name = "IY_Gyro"
+            bg.P = 9e4
+            bg.MaxTorque = Vector3.new(9e4, 9e4, 9e4)
+            bg.CFrame = humanoidRootPart.CFrame
+            bg.Parent = humanoidRootPart
+
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "IY_Velocity"
+            bv.Velocity = Vector3.new(0, 0, 0)
+            bv.MaxForce = Vector3.new(9e4, 9e4, 9e4)
+            bv.Parent = humanoidRootPart
+
+            if iyFlyConnection then iyFlyConnection:Disconnect() end
+            iyFlyConnection = RunService.RenderStepped:Connect(function()
+                if not FlyEnabled or not character:FindFirstChild("HumanoidRootPart") then return end
+                local camera = workspace.CurrentCamera
+                if not camera then return end
+                bg.CFrame = camera.CFrame
+                
+                local moveVector = Vector3.new(
+                    controlKeys.A + controlKeys.D,
+                    controlKeys.Q + controlKeys.E,
+                    controlKeys.W + controlKeys.S
+                )
+                
+                if moveVector.Magnitude > 0 then
+                    bv.Velocity = ((camera.CFrame.RightVector * moveVector.X) + (camera.CFrame.UpVector * moveVector.Y) + (camera.CFrame.LookVector * moveVector.Z)) * 50
+                else
+                    bv.Velocity = Vector3.new(0, 0.1, 0)
+                end
+            end)
+        else
+            if iyFlyConnection then iyFlyConnection:Disconnect() end
+            if humanoid then humanoid.PlatformStand = false end
+            if humanoidRootPart then
+                if humanoidRootPart:FindFirstChild("IY_Gyro") then humanoidRootPart.IY_Gyro:Destroy() end
+                if humanoidRootPart:FindFirstChild("IY_Velocity") then humanoidRootPart.IY_Velocity:Destroy() end
+            end
+        end
+    end)
+end
+
+local realCFrame = nil
+local spinAngle = 0
+
+RunService.Heartbeat:Connect(function(dt)
+    pcall(function()
+        local character = LocalPlayer.Character
+        if not character then return end
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if not humanoidRootPart then return end
+
+        if DesyncEnabled then
+            if not realCFrame then
+                realCFrame = humanoidRootPart.CFrame
+            end
+            spinAngle = spinAngle + (SpinSpeed * dt)
+            local randomOffset = Vector3.new(math.random(-12, 12), math.random(-4, 4), math.random(-12, 12))
+            humanoidRootPart.CFrame = CFrame.new(realCFrame.Position + randomOffset) * CFrame.Angles(0, math.rad(spinAngle), 0)
+        else
+            if realCFrame then
+                humanoidRootPart.CFrame = realCFrame
+                realCFrame = nil
+            end
+        end
+    end)
+end)
+
+-- Visual Name Spoofer & ESP Loop (Health, Distance, Tracers)
+RunService.RenderStepped:Connect(function()
+    pcall(function()
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local mouseLocation = UserInputService:GetMouseLocation()
+
+        if fovDrawingCircle then
+            if CrosshairFovEnabled then
+                fovDrawingCircle.Visible = true
+                fovDrawingCircle.Radius = FovRadius
+                fovDrawingCircle.Position = mouseLocation
+            else
+                fovDrawingCircle.Visible = false
+            end
+        end
+
+        -- Client-side Name Spoofer handling for local character UI elements or Billboards
+        if LocalPlayer.Character then
+            local head = LocalPlayer.Character:FindFirstChild("Head")
+            if head then
+                local billboard = head:FindFirstChild("AscendantNameTag")
+                if NameSpoofEnabled then
+                    if not billboard then
+                        billboard = Instance.new("BillboardGui")
+                        billboard.Name = "AscendantNameTag"
+                        billboard.Size = UDim2.new(0, 100, 0, 40)
+                        billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+                        billboard.AlwaysOnTop = true
+                        billboard.Parent = head
+
+                        local textLabel = Instance.new("TextLabel")
+                        textLabel.Name = "Label"
+                        textLabel.Size = UDim2.new(1, 0, 1, 0)
+                        textLabel.BackgroundTransparency = 1
+                        textLabel.Font = Enum.Font.Code
+                        textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                        textLabel.TextStrokeTransparency = 0.5
+                        textLabel.TextSize = 14
+                        textLabel.Parent = billboard
+                    end
+                    local label = billboard:FindFirstChild("Label")
+                    if label then
+                        label.Text = SpoofedNameText
+                    end
+                    billboard.Enabled = true
+                else
+                    if billboard then
+                        billboard.Enabled = false
+                    end
+                end
+            end
+        end
+
+        if AimbotEnabled then
+            local closestTarget = nil
+            local shortestDistance = math.huge
+
+            for _, player in ipairs(Players:GetPlayers()) do
+                if isEnemy(player) and player.Character then
+                    local head = player.Character:FindFirstChild("Head")
+                    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+                    if head and hum and hum.Health > 0 then
+                        local screenPoint, onScreen = camera:WorldToViewportPoint(head.Position)
+                        if onScreen then
+                            local magnitude = (Vector2.new(screenPoint.X, screenPoint.Y) - mouseLocation).Magnitude
+                            if magnitude < shortestDistance and magnitude <= FovRadius then
+                                shortestDistance = magnitude
+                                closestTarget = head
+                            end
+                        end
+                    end
+                end
+            end
+
+            if closestTarget then
+                camera.CFrame = CFrame.new(camera.CFrame.Position, closestTarget.Position)
+            end
+        end
+    end)
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    pcall(function()
+        if InfJumpEnabled and LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end)
+end)
+
+RunService.Stepped:Connect(function(dt)
+    pcall(function()
+        local character = LocalPlayer.Character
+        if not character then return end
+
+        if NoclipEnabled then
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+
+        if OrbitEnabled then
+            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            if humanoidRootPart then
+                local targetPlayer = nil
+                local shortestDist = math.huge
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if isEnemy(p) and p.Character then
+                        local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                        local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                        if hrp and hum and hum.Health > 0 then
+                            local dist = (hrp.Position - humanoidRootPart.Position).Magnitude
+                            if dist < shortestDist then
+                                shortestDist = dist
+                                targetPlayer = p.Character
+                            end
+                        end
+                    end
+                end
+
+                if targetPlayer and targetPlayer:FindFirstChild("HumanoidRootPart") then
+                    orbitAngle = orbitAngle + (OrbitSpeed * dt)
+                    local targetPos = targetPlayer.HumanoidRootPart.Position
+                    local x = targetPos.X + math.cos(orbitAngle) * OrbitRadius
+                    local z = targetPos.Z + math.sin(orbitAngle) * OrbitRadius
+                    local y = targetPos.Y + 5
+                    humanoidRootPart.CFrame = CFrame.new(Vector3.new(x, y, z), targetPos)
+                    if not DesyncEnabled then
+                        humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+                    end
+                end
+            end
+        end
+    end)
+end)
+
+-- ==========================================
+-- UI TABS SETUP
+-- ==========================================
+local mainPage = tabPages["main"]
+
+local aimbotBox = Instance.new("Frame")
+aimbotBox.Size = UDim2.new(0, 295, 0, 200)
+aimbotBox.Position = UDim2.new(0, 8, 0, 8)
+aimbotBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+aimbotBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+aimbotBox.BorderSizePixel = 1
+aimbotBox.Parent = mainPage
+
+local aimbotTitle = Instance.new("TextLabel")
+aimbotTitle.Size = UDim2.new(1, 0, 0, 18)
+aimbotTitle.Position = UDim2.new(0, 6, 0, 4)
+aimbotTitle.BackgroundTransparency = 1
+aimbotTitle.Font = Enum.Font.Code
+aimbotTitle.Text = "silent aim          aimbot         ..."
+aimbotTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+aimbotTitle.TextSize = 11
+aimbotTitle.TextXAlignment = Enum.TextXAlignment.Left
+aimbotTitle.Parent = aimbotBox
+
+createCheckbox(aimbotBox, "enabled", true, UDim2.new(0, 0, 0, 25), function(state) AimbotEnabled = state end)
+createCheckbox(aimbotBox, "manipulation", true, UDim2.new(0, 0, 0, 43))
+createCheckbox(aimbotBox, "closest part", false, UDim2.new(0, 0, 0, 61))
+createCheckbox(aimbotBox, "visualize", true, UDim2.new(0, 0, 0, 79))
+
+local weaponsBox = Instance.new("Frame")
+weaponsBox.Size = UDim2.new(0, 290, 0, 180)
+weaponsBox.Position = UDim2.new(0, 312, 0, 8)
+weaponsBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+weaponsBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+weaponsBox.BorderSizePixel = 1
+weaponsBox.Parent = mainPage
+
+local trigTitle = Instance.new("TextLabel")
+trigTitle.Size = UDim2.new(1, 0, 0, 18)
+trigTitle.Position = UDim2.new(0, 6, 0, 4)
+trigTitle.BackgroundTransparency = 1
+trigTitle.Font = Enum.Font.Code
+trigTitle.Text = "triggerbot                                      ..."
+trigTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+trigTitle.TextSize = 11
+trigTitle.TextXAlignment = Enum.TextXAlignment.Left
+trigTitle.Parent = weaponsBox
+
+createCheckbox(weaponsBox, "enabled", false, UDim2.new(0, 0, 0, 24))
+
+local wpHeader = Instance.new("TextLabel")
+wpHeader.Size = UDim2.new(1, 0, 0, 15)
+wpHeader.Position = UDim2.new(0, 6, 0, 45)
+wpHeader.BackgroundTransparency = 1
+wpHeader.Font = Enum.Font.Code
+wpHeader.Text = "weapons"
+wpHeader.TextColor3 = Color3.fromRGB(150, 130, 170)
+wpHeader.TextSize = 11
+wpHeader.TextXAlignment = Enum.TextXAlignment.Left
+wpHeader.Parent = weaponsBox
+
+createCheckbox(weaponsBox, "no spread", true, UDim2.new(0, 0, 0, 64))
+createCheckbox(weaponsBox, "no recoil", true, UDim2.new(0, 0, 0, 82))
+createCheckbox(weaponsBox, "full auto", true, UDim2.new(0, 0, 0, 100))
+createCheckbox(weaponsBox, "rapid melee", true, UDim2.new(0, 0, 0, 118))
+createCheckbox(weaponsBox, "always backstab", false, UDim2.new(0, 0, 0, 136))
+
+-- Character Tab
+local charPage = tabPages["character"]
+local charBox = Instance.new("Frame")
+charBox.Size = UDim2.new(0, 295, 0, 180)
+charBox.Position = UDim2.new(0, 8, 0, 8)
+charBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+charBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+charBox.BorderSizePixel = 1
+charBox.Parent = charPage
+
+local charTitle = Instance.new("TextLabel")
+charTitle.Size = UDim2.new(1, 0, 0, 18)
+charTitle.Position = UDim2.new(0, 6, 0, 4)
+charTitle.BackgroundTransparency = 1
+charTitle.Font = Enum.Font.Code
+charTitle.Text = "character modifiers             ..."
+charTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+charTitle.TextSize = 11
+charTitle.TextXAlignment = Enum.TextXAlignment.Left
+charTitle.Parent = charBox
+
+createCheckbox(charBox, "fly (infinite yield style)", false, UDim2.new(0, 0, 0, 30), function(state) toggleInfiniteYieldFly(state) end)
+createCheckbox(charBox, "infinite jump", false, UDim2.new(0, 0, 0, 60), function(state) InfJumpEnabled = state end)
+createCheckbox(charBox, "noclip", false, UDim2.new(0, 0, 0, 90), function(state) NoclipEnabled = state end)
+
+-- ESP Tab
+local espPage = tabPages["esp"]
+local espBox = Instance.new("Frame")
+espBox.Size = UDim2.new(0, 295, 0, 240)
+espBox.Position = UDim2.new(0, 8, 0, 8)
+espBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+espBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+espBox.BorderSizePixel = 1
+espBox.Parent = espPage
+
+local espTitle = Instance.new("TextLabel")
+espTitle.Size = UDim2.new(1, 0, 0, 18)
+espTitle.Position = UDim2.new(0, 6, 0, 4)
+espTitle.BackgroundTransparency = 1
+espTitle.Font = Enum.Font.Code
+espTitle.Text = "esp & visual enhancements   ..."
+espTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+espTitle.TextSize = 11
+espTitle.TextXAlignment = Enum.TextXAlignment.Left
+espTitle.Parent = espBox
+
+createCheckbox(espBox, "health esp", false, UDim2.new(0, 0, 0, 30), function(state) EspHealthEnabled = state end)
+createCheckbox(espBox, "distance esp", false, UDim2.new(0, 0, 0, 60), function(state) EspDistanceEnabled = state end)
+createCheckbox(espBox, "bullet tracers", false, UDim2.new(0, 0, 0, 90), function(state) BulletTracersEnabled = state end)
+createCheckbox(espBox, "crosshair fov circle", false, UDim2.new(0, 0, 0, 120), function(state) CrosshairFovEnabled = state end)
+createFingerSlider(espBox, "fov radius size", 30, 400, FovRadius, 160, function(val) FovRadius = val end)
+
+-- Visuals Tab (Name Spoofer Addition)
+local visualsPage = tabPages["visuals"]
+local nameSpoofBox = Instance.new("Frame")
+nameSpoofBox.Size = UDim2.new(0, 295, 0, 150)
+nameSpoofBox.Position = UDim2.new(0, 8, 0, 8)
+nameSpoofBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+nameSpoofBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+nameSpoofBox.BorderSizePixel = 1
+nameSpoofBox.Parent = visualsPage
+
+local nameSpoofTitle = Instance.new("TextLabel")
+nameSpoofTitle.Size = UDim2.new(1, 0, 0, 18)
+nameSpoofTitle.Position = UDim2.new(0, 6, 0, 4)
+nameSpoofTitle.BackgroundTransparency = 1
+nameSpoofTitle.Font = Enum.Font.Code
+nameSpoofTitle.Text = "client name spoofer          ..."
+nameSpoofTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+nameSpoofTitle.TextSize = 11
+nameSpoofTitle.TextXAlignment = Enum.TextXAlignment.Left
+nameSpoofTitle.Parent = nameSpoofBox
+
+createCheckbox(nameSpoofBox, "enable name spoofer", false, UDim2.new(0, 0, 0, 30), function(state)
+    NameSpoofEnabled = state
+end)
+
+local nameInputBox = Instance.new("TextBox")
+nameInputBox.Size = UDim2.new(1, -20, 0, 30)
+nameInputBox.Position = UDim2.new(0, 10, 0, 65)
+nameInputBox.BackgroundColor3 = Color3.fromRGB(20, 16, 28)
+nameInputBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+nameInputBox.Font = Enum.Font.Code
+nameInputBox.Text = SpoofedNameText
+nameInputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+nameInputBox.TextSize = 12
+nameInputBox.ClearTextOnFocus = false
+nameInputBox.Parent = nameSpoofBox
+
+nameInputBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        SpoofedNameText = nameInputBox.Text
+    end
+end)
+
+-- Settings Tab (Unlockers)
+local settingsPage = tabPages["settings"]
+local unlockerBox = Instance.new("Frame")
+unlockerBox.Size = UDim2.new(0, 295, 0, 180)
+unlockerBox.Position = UDim2.new(0, 8, 0, 8)
+unlockerBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+unlockerBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+unlockerBox.BorderSizePixel = 1
+unlockerBox.Parent = settingsPage
+
+local unlockerTitle = Instance.new("TextLabel")
+unlockerTitle.Size = UDim2.new(1, 0, 0, 18)
+unlockerTitle.Position = UDim2.new(0, 6, 0, 4)
+unlockerTitle.BackgroundTransparency = 1
+unlockerTitle.Font = Enum.Font.Code
+unlockerTitle.Text = "rivals unlocker (skins/wraps)   ..."
+unlockerTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+unlockerTitle.TextSize = 11
+unlockerTitle.TextXAlignment = Enum.TextXAlignment.Left
+unlockerTitle.Parent = unlockerBox
+
+createCheckbox(unlockerBox, "unlock all skins", false, UDim2.new(0, 0, 0, 30), function(state) end)
+createCheckbox(unlockerBox, "unlock all wraps", false, UDim2.new(0, 0, 0, 60), function(state) end)
+createCheckbox(unlockerBox, "unlock all finishers", false, UDim2.new(0, 0, 0, 90), function(state) end)
+
+-- Misc Tab (Ragebot, Orbit, Spin Speed)
+local miscPage = tabPages["misc"]
+local rageBox = Instance.new("Frame")
+rageBox.Size = UDim2.new(0, 295, 0, 330)
+rageBox.Position = UDim2.new(0, 8, 0, 8)
+rageBox.BackgroundColor3 = Color3.fromRGB(14, 11, 19)
+rageBox.BorderColor3 = Color3.fromRGB(60, 45, 80)
+rageBox.BorderSizePixel = 1
+rageBox.Parent = miscPage
+
+local rageTitle = Instance.new("TextLabel")
+rageTitle.Size = UDim2.new(1, 0, 0, 18)
+rageTitle.Position = UDim2.new(0, 6, 0, 4)
+rageTitle.BackgroundTransparency = 1
+rageTitle.Font = Enum.Font.Code
+rageTitle.Text = "ragebot / orbit / desync      ..."
+rageTitle.TextColor3 = Color3.fromRGB(150, 130, 170)
+rageTitle.TextSize = 11
+rageTitle.TextXAlignment = Enum.TextXAlignment.Left
+rageTitle.Parent = rageBox
+
+createCheckbox(rageBox, "orbit enabled", false, UDim2.new(0, 0, 0, 30), function(state) OrbitEnabled = state end)
+createCheckbox(rageBox, "ragebot desync", false, UDim2.new(0, 0, 0, 55), function(state) DesyncEnabled = state end)
+createCheckbox(rageBox, "toggle / untoggle gui", true, UDim2.new(0, 0, 0, 80), function(state)
+    MainFrame.Visible = state
+    isToggledOn = state
+end)
+createCheckbox(rageBox, "lock / unlock gui", false, UDim2.new(0, 0, 0, 105), function(state)
+    MainFrame.Draggable = not state
+end)
+
+createFingerSlider(rageBox, "orbit radius", 5, 50, OrbitRadius, 135, function(val) OrbitRadius = val end)
+createFingerSlider(rageBox, "orbit speed", 2, 30, OrbitSpeed, 185, function(val) OrbitSpeed = val end)
+createFingerSlider(rageBox, "spin speed adj", 20, 500, SpinSpeed, 235, function(val) SpinSpeed = val end)
+
+switchTab("main")
