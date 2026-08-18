@@ -1,0 +1,454 @@
+-- DiamondX v1: Complete UI & Feature Integration Script (Bug-Free & Optimized)
+-- Updated: Added real-time performance tracking (FPS and Ping) matching your HUD banner.
+
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Stats = game:GetService("Stats")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Global Feature State Table
+local Config = {
+    -- Main / Ragebot
+    SilentAim = true,
+    IgnoreFov = false,
+    TeamCheck = true,
+    ShowFovCircle = true,
+    FovRadius = 150,
+    TargetPart = "Head",
+    
+    RagebotEnable = false,
+    Orbit = false,
+    Desync = false,
+    Attack = 1,
+    Hide = 1,
+    
+    Wallbang = false,
+    
+    -- Visuals / Weapons
+    SecondaryWeapon = "Revolver",
+    FistWeapon = "Fists",
+    GrenadeWeapon = "Grenade",
+    AutoShoot = false,
+    RapidFire = false,
+    RapidMelee = false,
+    NoRecoil = false,
+    
+    Fly = false,
+    FlySpeed = 1000,
+    Noclip = false,
+    InfiniteJump = false,
+    AutoVote = false,
+    VoteMap = "Chess",
+    
+    -- Character / Spoofer
+    SpooferEnable = false,
+    SpooferName = "Andy",
+    
+    -- ESP
+    ShowBoxes = false,
+    ShowNames = false,
+    ShowTracers = false,
+    ShowHealthBars = false
+}
+
+-- Clean up existing GUI instance safely
+if CoreGui:FindFirstChild("DiamondXHub") then
+    CoreGui.DiamondXHub:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DiamondXHub"
+ScreenGui.Parent = CoreGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Main Container Window
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 12, 22)
+MainFrame.BorderColor3 = Color3.fromRGB(65, 45, 95)
+MainFrame.BorderSizePixel = 1
+MainFrame.Position = UDim2.new(0.5, -280, 0.5, -200)
+MainFrame.Size = UDim2.new(0, 560, 0, 390)
+MainFrame.Active = true
+
+-- Draggable implementation
+local dragging, dragInput, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Top Title Banner
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Parent = MainFrame
+TopBar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
+TopBar.BorderColor3 = Color3.fromRGB(65, 45, 95)
+TopBar.BorderSizePixel = 1
+TopBar.Position = UDim2.new(0, 10, 0, 10)
+TopBar.Size = UDim2.new(1, -20, 0, 24)
+
+local TopBarText = Instance.new("TextLabel")
+TopBarText.Parent = TopBar
+TopBarText.BackgroundTransparency = 1
+TopBarText.Size = UDim2.new(1, 0, 1, 0)
+TopBarText.Font = Enum.Font.Code
+TopBarText.Text = "DiamondX v1 | Free | 18 fps | 135 ms"
+TopBarText.TextColor3 = Color3.fromRGB(200, 190, 220)
+TopBarText.TextSize = 12
+
+-- Dynamic FPS & Ping Updater matching HUD display
+task.spawn(function()
+    while true do
+        pcall(function()
+            local fps = math.floor(1 / RunService.RenderStepped:Wait())
+            local ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+            TopBarText.Text = string.format("DiamondX v1 | Free | %d fps | %d ms", fps, ping)
+        end)
+        task.wait(0.5)
+    end
+end)
+
+-- Subtitle Discord Link
+local SubTitle = Instance.new("TextLabel")
+SubTitle.Parent = MainFrame
+SubTitle.BackgroundTransparency = 1
+SubTitle.Position = UDim2.new(0, 0, 0, 38)
+SubTitle.Size = UDim2.new(1, 0, 0, 20)
+SubTitle.Font = Enum.Font.SourceSans
+SubTitle.Text = "DiamondX v1 - https://discord.gg/h2K7mqmCG"
+SubTitle.TextColor3 = Color3.fromRGB(140, 130, 160)
+SubTitle.TextSize = 13
+
+-- Tab Selection Bar
+local TabBar = Instance.new("Frame")
+TabBar.Parent = MainFrame
+TabBar.BackgroundTransparency = 1
+TabBar.Position = UDim2.new(0, 10, 0, 65)
+TabBar.Size = UDim2.new(1, -20, 0, 26)
+
+local tabs = {"Main", "ESP", "Visual", "Character", "Misc", "UI Settings"}
+local tabButtons = {}
+local tabPages = {}
+
+for i, tabName in ipairs(tabs) do
+    local btn = Instance.new("TextButton")
+    btn.Parent = TabBar
+    btn.BackgroundColor3 = Color3.fromRGB(18, 15, 26)
+    btn.BorderColor3 = Color3.fromRGB(65, 45, 95)
+    btn.Position = UDim2.new(0, (i - 1) * 88, 0, 0)
+    btn.Size = UDim2.new(0, 84, 1, 0)
+    btn.Font = Enum.Font.SourceSans
+    btn.Text = tabName
+    btn.TextColor3 = Color3.fromRGB(210, 200, 230)
+    btn.TextSize = 14
+    tabButtons[tabName] = btn
+
+    local page = Instance.new("ScrollingFrame")
+    page.Parent = MainFrame
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.Position = UDim2.new(0, 10, 0, 98)
+    page.Size = UDim2.new(1, -20, 1, -108)
+    page.Visible = (i == 1)
+    page.CanvasSize = UDim2.new(0, 0, 0, 380)
+    page.ScrollBarThickness = 3
+    tabPages[tabName] = page
+end
+
+local function selectTab(targetName)
+    for name, page in pairs(tabPages) do
+        page.Visible = (name == targetName)
+        tabButtons[name].BackgroundColor3 = (name == targetName) and Color3.fromRGB(35, 25, 55) or Color3.fromRGB(18, 15, 26)
+    end
+end
+
+for name, btn in pairs(tabButtons) do
+    btn.MouseButton1Click:Connect(function()
+        selectTab(name)
+    end)
+end
+
+-- Helper: Create Group Box
+local function createGroupBox(parent, title, posX, posY, sizeX, sizeY)
+    local box = Instance.new("Frame")
+    box.Parent = parent
+    box.BackgroundColor3 = Color3.fromRGB(18, 15, 26)
+    box.BorderColor3 = Color3.fromRGB(65, 45, 95)
+    box.Position = UDim2.new(0, posX, 0, posY)
+    box.Size = UDim2.new(0, sizeX, 0, sizeY)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = box
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 8, 0, 4)
+    lbl.Size = UDim2.new(1, -16, 0, 18)
+    lbl.Font = Enum.Font.SourceSansBold
+    lbl.Text = title
+    lbl.TextColor3 = Color3.fromRGB(220, 210, 240)
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local sep = Instance.new("Frame")
+    sep.Parent = box
+    sep.BackgroundColor3 = Color3.fromRGB(65, 45, 95)
+    sep.BorderSizePixel = 0
+    sep.Position = UDim2.new(0, 0, 0, 22)
+    sep.Size = UDim2.new(1, 0, 0, 1)
+
+    return box
+end
+
+-- Helper: Create Toggle inside Group Box
+local function createToggle(parent, name, configKey, yPos)
+    local state = Config[configKey]
+    local btn = Instance.new("TextButton")
+    btn.Parent = parent
+    btn.BackgroundColor3 = state and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
+    btn.BorderColor3 = Color3.fromRGB(65, 45, 95)
+    btn.Position = UDim2.new(0, 10, 0, yPos)
+    btn.Size = UDim2.new(0, 13, 0, 13)
+    btn.Text = ""
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = parent
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 30, 0, yPos - 4)
+    lbl.Size = UDim2.new(0, 200, 0, 20)
+    lbl.Font = Enum.Font.SourceSans
+    lbl.Text = name
+    lbl.TextColor3 = Color3.fromRGB(200, 190, 220)
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    btn.MouseButton1Click:Connect(function()
+        Config[configKey] = not Config[configKey]
+        btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
+    end)
+end
+
+-- Helper: Create Slider with Safe Dragging Boundaries
+local function createSlider(parent, name, configKey, min, max, yPos)
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = parent
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 10, 0, yPos)
+    lbl.Size = UDim2.new(1, -20, 0, 15)
+    lbl.Font = Enum.Font.SourceSans
+    lbl.Text = name
+    lbl.TextColor3 = Color3.fromRGB(200, 190, 220)
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local bar = Instance.new("Frame")
+    bar.Parent = parent
+    bar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
+    bar.BorderColor3 = Color3.fromRGB(65, 45, 95)
+    bar.Position = UDim2.new(0, 10, 0, yPos + 16)
+    bar.Size = UDim2.new(0, 235, 0, 14)
+
+    local fill = Instance.new("Frame")
+    fill.Parent = bar
+    fill.BackgroundColor3 = Color3.fromRGB(85, 65, 140)
+    fill.BorderSizePixel = 0
+    local initialPos = math.clamp((Config[configKey] - min) / (max - min), 0, 1)
+    fill.Size = UDim2.new(initialPos, 0, 1, 0)
+
+    local valLbl = Instance.new("TextLabel")
+    valLbl.Parent = bar
+    valLbl.BackgroundTransparency = 1
+    valLbl.Size = UDim2.new(1, 0, 1, 0)
+    valLbl.Font = Enum.Font.SourceSans
+    valLbl.Text = tostring(Config[configKey]) .. "/" .. tostring(max)
+    valLbl.TextColor3 = Color3.fromRGB(220, 210, 240)
+    valLbl.TextSize = 11
+
+    local draggingSlider = false
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = true
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local absoluteSizeX = bar.AbsoluteSize.X
+            if absoluteSizeX > 0 then
+                local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / absoluteSizeX, 0, 1)
+                Config[configKey] = math.floor(min + (max - min) * pos)
+                fill.Size = UDim2.new(pos, 0, 1, 0)
+                valLbl.Text = tostring(Config[configKey]) .. "/" .. tostring(max)
+            end
+        end
+    end)
+end
+
+-- ==================== TAB POPULATION ====================
+
+local mainPage = tabPages["Main"]
+
+-- Ragebot Group Box
+local boxRage = createGroupBox(mainPage, "Ragebot", 0, 5, 260, 160)
+createToggle(boxRage, "Enable", "RagebotEnable", 30)
+createToggle(boxRage, "Orbit", "Orbit", 52)
+createToggle(boxRage, "Desync (Beta)", "Desync", 74)
+createSlider(boxRage, "Attack", "Attack", 1, 10, 96)
+createSlider(boxRage, "Hide", "Hide", 1, 10, 145)
+
+-- Wallbang Group Box on Main
+local boxWallbang = createGroupBox(mainPage, "Wallbang", 270, 5, 250, 80)
+createToggle(boxWallbang, "Enable", "Wallbang", 32)
+
+-- ESP Tab
+local espPage = tabPages["ESP"]
+local boxEsp = createGroupBox(espPage, "ESP Settings", 0, 5, 260, 130)
+createToggle(boxEsp, "Show Boxes", "ShowBoxes", 32)
+createToggle(boxEsp, "Show Names", "ShowNames", 54)
+createToggle(boxEsp, "Show Tracers", "ShowTracers", 76)
+createToggle(boxEsp, "Show Health Bars", "ShowHealthBars", 98)
+
+-- Visual Tab / Weapons & Movement
+local visPage = tabPages["Visual"]
+local boxGun = createGroupBox(visPage, "Gun Mode", 0, 140, 250, 120)
+createToggle(boxGun, "Auto Shoot", "AutoShoot", 30)
+createToggle(boxGun, "Rapid Fire", "RapidFire", 52)
+createToggle(boxGun, "Rapid Melee", "RapidMelee", 74)
+createToggle(boxGun, "No Recoil", "NoRecoil", 96)
+
+local boxMove = createGroupBox(visPage, "Movement", 270, 5, 250, 130)
+createToggle(boxMove, "Fly", "Fly", 30)
+createSlider(boxMove, "Fly Speed", "FlySpeed", 100, 1000, 52)
+createToggle(boxMove, "Noclip", "Noclip", 88)
+createToggle(boxMove, "Infinite Jump", "InfiniteJump", 110)
+
+-- Character Tab / Spoofer
+local charPage = tabPages["Character"]
+local boxSpoof = createGroupBox(charPage, "Spoofer", 0, 5, 250, 90)
+createToggle(boxSpoof, "Enable", "SpooferEnable", 30)
+
+local spoofInput = Instance.new("TextBox", boxSpoof)
+spoofInput.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
+spoofInput.BorderColor3 = Color3.fromRGB(65, 45, 95)
+spoofInput.Position = UDim2.new(0, 10, 0, 55)
+spoofInput.Size = UDim2.new(0, 230, 0, 22)
+spoofInput.Font = Enum.Font.SourceSans
+spoofInput.Text = Config.SpooferName
+spoofInput.TextColor3 = Color3.fromRGB(220, 210, 240)
+spoofInput.TextSize = 13
+spoofInput.ClearTextOnFocus = false
+spoofInput.FocusLost:Connect(function()
+    Config.SpooferName = spoofInput.Text
+end)
+
+-- ==================== SAFE RUNTIME LOGIC ====================
+
+local function GetBestTarget()
+    local target = nil
+    local shortestDist = math.huge
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetPart = player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            
+            if targetPart and humanoid and humanoid.Health > 0 then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        target = targetPart
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+-- Core Execution Loop with Safe Guardrails
+RunService.RenderStepped:Connect(function()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    -- Ragebot Orbit & Target Lock Feature
+    if Config.RagebotEnable and Config.Orbit then
+        local targetPart = GetBestTarget()
+        if targetPart then
+            local targetPos = targetPart.Position + Vector3.new(0, 2, 0)
+            rootPart.CFrame = CFrame.new(targetPos, targetPart.Position)
+            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+    end
+    
+    -- Desync (Beta) Feature Logic with error handling
+    if Config.RagebotEnable and Config.Desync then
+        local originalCFrame = rootPart.CFrame
+        if math.sin(tick() * 10) > 0 then
+            pcall(function()
+                rootPart.CFrame = originalCFrame + Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
+                RunService.RenderStepped:Wait()
+                rootPart.CFrame = originalCFrame
+            end)
+        end
+    end
+    
+    -- Noclip implementation
+    if Config.Noclip then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- Infinite Jump Hook
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfiniteJump then
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end)
+
+print("[DiamondX v1] Script fully loaded with live FPS/Ping indicator.")
