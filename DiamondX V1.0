@@ -1,53 +1,55 @@
--- DiamondX Hub | Mobile Roblox Executor Script
--- Layout: exact replica of Nesix Hub screenshot
+-- DiamondX Hub | V1.1 | Mobile-first rewrite
 -- Tabs: Main, ESP, Visual, Character, Misc, UI Settings
+-- Touch-native: drag, sliders, oversized tap targets, scale-relative sizing
 
-local CoreGui         = game:GetService("CoreGui")
+local CoreGui          = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local RunService      = game:GetService("RunService")
-local Players         = game:GetService("Players")
-local LocalPlayer     = Players.LocalPlayer
+local RunService       = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local Stats            = game:GetService("Stats")          -- fetched properly
+local LocalPlayer      = Players.LocalPlayer
+
+-- ─────────────────────────────────────────────
+--  SCREEN METRICS  (mobile-relative)
+-- ─────────────────────────────────────────────
+local VP          = workspace.CurrentCamera.ViewportSize
+local IS_MOBILE   = UserInputService.TouchEnabled
+local WIN_W       = math.min(VP.X - 20, IS_MOBILE and 420 or 700)
+local WIN_H       = IS_MOBILE and 340 or 420
+local SIDEBAR_W   = IS_MOBILE and 80  or 90
+local TAP_H       = IS_MOBILE and 36  or 22   -- finger-friendly row height
+local CHECK_SZ    = IS_MOBILE and 22  or 14   -- checkbox square
+local FONT_SZ_LG  = IS_MOBILE and 15  or 13
+local FONT_SZ_SM  = IS_MOBILE and 13  or 11
+local TAB_FONT    = IS_MOBILE and 13  or 12
 
 -- ─────────────────────────────────────────────
 --  CONFIG
 -- ─────────────────────────────────────────────
 local Config = {
-    -- Ragebot (Main)
     RagebotEnabled = false,
     Orbit          = false,
     Desync         = false,
-    AttackTick     = 1,   -- slider 1-10
-    HideTick       = 1,   -- slider 1-10
-
-    -- Wallbang (Main)
+    AttackTick     = 1,
+    HideTick       = 1,
     Wallbang       = false,
-
-    -- ESP
     ESPEnabled     = false,
     ESPBoxes       = false,
     ESPNames       = false,
     ESPHealth      = false,
     ESPTracers     = false,
-
-    -- Visual
     NoRecoil       = false,
     NoSpread       = false,
     FullBright     = false,
-
-    -- Character
     Fly            = false,
     FlySpeed       = 50,
     InfiniteJump   = false,
     Noclip         = false,
     SpeedHack      = false,
     WalkSpeed      = 16,
-
-    -- Misc
     RapidFire      = false,
     FastAttack     = false,
     AutoParry      = false,
-
-    -- UI
     UILocked       = false,
     UIHidden       = false,
 }
@@ -63,208 +65,235 @@ end
 --  ROOT GUI
 -- ─────────────────────────────────────────────
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name            = "DiamondXHub"
-ScreenGui.Parent          = CoreGui
-ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
-ScreenGui.ResetOnSpawn    = false
+ScreenGui.Name             = "DiamondXHub"
+ScreenGui.Parent           = CoreGui
+ScreenGui.ZIndexBehavior   = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn     = false
+ScreenGui.IgnoreGuiInset   = true   -- fixes notch/status-bar offset on phones
 
 -- ─────────────────────────────────────────────
---  COLOURS  (pulled from screenshot)
+--  COLOURS
 -- ─────────────────────────────────────────────
 local C = {
-    bg          = Color3.fromRGB(13,  15,  30),   -- near-black navy
-    panel       = Color3.fromRGB(18,  20,  40),   -- slightly lighter panel
-    border      = Color3.fromRGB(80,  60, 160),   -- purple border
-    tabActive   = Color3.fromRGB(22,  24,  48),   -- active tab bg
-    tabInactive = Color3.fromRGB(13,  15,  30),   -- inactive tab bg
-    groupBg     = Color3.fromRGB(16,  18,  36),   -- group box fill
-    sliderFill  = Color3.fromRGB(90,  60, 180),   -- purple slider
-    sliderBg    = Color3.fromRGB(28,  22,  55),   -- slider track
-    checkOn     = Color3.fromRGB(90,  60, 180),
-    checkOff    = Color3.fromRGB(28,  22,  55),
-    textMain    = Color3.fromRGB(220, 215, 240),
-    textDim     = Color3.fromRGB(150, 140, 175),
-    textHeader  = Color3.fromRGB(255, 255, 255),
-    sidebarBg   = Color3.fromRGB(10,  12,  26),
-    topbar      = Color3.fromRGB(10,  12,  26),
-    red         = Color3.fromRGB(180,  40,  40),
+    bg         = Color3.fromRGB(13,  15,  30),
+    panel      = Color3.fromRGB(18,  20,  40),
+    border     = Color3.fromRGB(80,  60, 160),
+    tabActive  = Color3.fromRGB(22,  24,  48),
+    tabInactive= Color3.fromRGB(13,  15,  30),
+    groupBg    = Color3.fromRGB(16,  18,  36),
+    sliderFill = Color3.fromRGB(90,  60, 180),
+    sliderBg   = Color3.fromRGB(28,  22,  55),
+    checkOn    = Color3.fromRGB(90,  60, 180),
+    checkOff   = Color3.fromRGB(28,  22,  55),
+    textMain   = Color3.fromRGB(220, 215, 240),
+    textDim    = Color3.fromRGB(150, 140, 175),
+    textHeader = Color3.fromRGB(255, 255, 255),
+    sidebarBg  = Color3.fromRGB(10,  12,  26),
+    topbar     = Color3.fromRGB(10,  12,  26),
+    red        = Color3.fromRGB(180,  40,  40),
 }
 
 -- ─────────────────────────────────────────────
---  SIDEBAR  (Toggle UI / Unlock UI)
+--  SIDEBAR  (draggable on mobile)
 -- ─────────────────────────────────────────────
 local Sidebar = Instance.new("Frame", ScreenGui)
-Sidebar.Name               = "Sidebar"
-Sidebar.BackgroundColor3   = C.sidebarBg
-Sidebar.BorderColor3       = C.border
-Sidebar.BorderSizePixel    = 1
-Sidebar.Position           = UDim2.new(0, 0, 0.28, 0)
-Sidebar.Size               = UDim2.new(0, 90, 0, 72)
-Sidebar.ZIndex             = 10
+Sidebar.Name             = "Sidebar"
+Sidebar.BackgroundColor3 = C.sidebarBg
+Sidebar.BorderColor3     = C.border
+Sidebar.BorderSizePixel  = 1
+Sidebar.Position         = UDim2.new(0, 0, 0.30, 0)
+Sidebar.Size             = UDim2.new(0, SIDEBAR_W, 0, TAP_H * 2 + 2)
+Sidebar.ZIndex           = 20
+Sidebar.Active           = true
+
+-- sidebar drag
+local sDrag, sDragStart, sSideStart
+Sidebar.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
+        sDrag = true; sDragStart = i.Position; sSideStart = Sidebar.Position
+        i.Changed:Connect(function()
+            if i.UserInputState == Enum.UserInputState.End then sDrag = false end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if not sDrag then return end
+    if i.UserInputType ~= Enum.UserInputType.MouseMovement
+    and i.UserInputType ~= Enum.UserInputType.Touch then return end
+    local d = i.Position - sDragStart
+    Sidebar.Position = UDim2.new(
+        sSideStart.X.Scale, sSideStart.X.Offset + d.X,
+        sSideStart.Y.Scale, sSideStart.Y.Offset + d.Y
+    )
+end)
 
 local function makeSideBtn(text, yOff)
     local b = Instance.new("TextButton", Sidebar)
-    b.BackgroundColor3  = C.sidebarBg
-    b.BorderColor3      = C.border
-    b.BorderSizePixel   = 1
-    b.Position          = UDim2.new(0, 0, 0, yOff)
-    b.Size              = UDim2.new(1, 0, 0, 35)
-    b.Font              = Enum.Font.SourceSansBold
-    b.Text              = text
-    b.TextColor3        = C.textMain
-    b.TextSize          = 13
-    b.ZIndex            = 11
+    b.BackgroundColor3 = C.sidebarBg
+    b.BorderColor3     = C.border
+    b.BorderSizePixel  = 1
+    b.Position         = UDim2.new(0, 0, 0, yOff)
+    b.Size             = UDim2.new(1, 0, 0, TAP_H)
+    b.Font             = Enum.Font.SourceSansBold
+    b.Text             = text
+    b.TextColor3       = C.textMain
+    b.TextSize         = FONT_SZ_SM
+    b.ZIndex           = 21
     return b
 end
 
-local ToggleBtn  = makeSideBtn("Toggle UI",  0)
-local UnlockBtn  = makeSideBtn("Unlock UI", 36)
+local ToggleBtn = makeSideBtn("Toggle UI", 0)
+local UnlockBtn = makeSideBtn("Unlock UI", TAP_H + 2)
 
 -- ─────────────────────────────────────────────
---  MAIN WINDOW
+--  MAIN WINDOW  (scale-relative, centered)
 -- ─────────────────────────────────────────────
 local Win = Instance.new("Frame", ScreenGui)
-Win.Name              = "MainWindow"
-Win.BackgroundColor3  = C.bg
-Win.BorderColor3      = C.border
-Win.BorderSizePixel   = 2
-Win.Position          = UDim2.new(0.5, -520, 0.5, -210)
-Win.Size              = UDim2.new(0, 1040, 0, 420)
-Win.Active            = true
-Win.ZIndex            = 5
+Win.Name             = "MainWindow"
+Win.BackgroundColor3 = C.bg
+Win.BorderColor3     = C.border
+Win.BorderSizePixel  = 2
+Win.Position         = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
+Win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
+Win.Active           = true
+Win.ZIndex           = 5
 
--- ── dragging ──
-local drag, dragStart, winStart
+-- window drag  (touch + mouse, unified)
+local wDrag, wDragStart, wWinStart, wLastInput
 Win.InputBegan:Connect(function(i)
     if Config.UILocked then return end
     if i.UserInputType == Enum.UserInputType.MouseButton1
     or i.UserInputType == Enum.UserInputType.Touch then
-        drag      = true
-        dragStart = i.Position
-        winStart  = Win.Position
+        wDrag = true; wDragStart = i.Position; wWinStart = Win.Position
         i.Changed:Connect(function()
-            if i.UserInputState == Enum.UserInputState.End then drag = false end
+            if i.UserInputState == Enum.UserInputState.End then wDrag = false end
         end)
     end
 end)
-local lastDragInput
 Win.InputChanged:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseMovement
     or i.UserInputType == Enum.UserInputType.Touch then
-        lastDragInput = i
+        wLastInput = i
     end
 end)
 UserInputService.InputChanged:Connect(function(i)
-    if Config.UILocked then return end
-    if i == lastDragInput and drag then
-        local d = i.Position - dragStart
-        Win.Position = UDim2.new(
-            winStart.X.Scale, winStart.X.Offset + d.X,
-            winStart.Y.Scale, winStart.Y.Offset + d.Y
+    if Config.UILocked or not wDrag or i ~= wLastInput then return end
+    local d = i.Position - wDragStart
+    Win.Position = UDim2.new(
+        wWinStart.X.Scale, wWinStart.X.Offset + d.X,
+        wWinStart.Y.Scale, wWinStart.Y.Offset + d.Y
+    )
+end)
+
+-- ─────────────────────────────────────────────
+--  TOP BAR
+-- ─────────────────────────────────────────────
+local TOPBAR_H = IS_MOBILE and 36 or 28
+
+local TopBar = Instance.new("Frame", Win)
+TopBar.BackgroundColor3 = C.topbar
+TopBar.BorderColor3     = C.border
+TopBar.BorderSizePixel  = 1
+TopBar.Size             = UDim2.new(1, 0, 0, TOPBAR_H)
+TopBar.ZIndex           = 6
+
+local TopStats = Instance.new("TextLabel", TopBar)
+TopStats.BackgroundTransparency = 1
+TopStats.Position        = UDim2.new(0, 8, 0, 0)
+TopStats.Size            = UDim2.new(1, -36, 1, 0)
+TopStats.Font            = Enum.Font.SourceSansBold
+TopStats.TextColor3      = C.textMain
+TopStats.TextSize        = FONT_SZ_SM
+TopStats.TextXAlignment  = Enum.TextXAlignment.Left
+TopStats.ZIndex          = 7
+TopStats.Text            = "DiamondX | V1.1 | Free | -- fps | -- ms"
+
+-- fps/ping  — fixed: no nested :Wait() inside RenderStepped
+local fpsBuffer, fpsClock, fpsValue, pingValue = {}, 0, 0, 0
+RunService.Heartbeat:Connect(function(dt)
+    fpsClock = fpsClock + dt
+    table.insert(fpsBuffer, dt)
+    if fpsClock >= 0.5 then
+        local total = 0
+        for _, v in ipairs(fpsBuffer) do total = total + v end
+        fpsValue  = math.floor(#fpsBuffer / total + 0.5)
+        fpsBuffer = {}
+        fpsClock  = 0
+        pcall(function()
+            pingValue = math.floor(
+                Stats.Network.ServerStatsItem["Data Ping"].Value
+            )
+        end)
+        TopStats.Text = string.format(
+            "DiamondX | V1.1 | Free | %d fps | %d ms", fpsValue, pingValue
         )
     end
 end)
 
--- ─────────────────────────────────────────────
---  TOP BAR  (version / stats strip)
--- ─────────────────────────────────────────────
-local TopBar = Instance.new("Frame", Win)
-TopBar.BackgroundColor3  = C.topbar
-TopBar.BorderColor3      = C.border
-TopBar.BorderSizePixel   = 1
-TopBar.Size              = UDim2.new(1, 0, 0, 28)
-TopBar.ZIndex            = 6
-
-local TopStats = Instance.new("TextLabel", TopBar)
-TopStats.BackgroundTransparency = 1
-TopStats.Position  = UDim2.new(0, 8, 0, 0)
-TopStats.Size      = UDim2.new(0.6, 0, 1, 0)
-TopStats.Font      = Enum.Font.SourceSansBold
-TopStats.TextColor3 = C.textMain
-TopStats.TextSize  = 12
-TopStats.TextXAlignment = Enum.TextXAlignment.Left
-TopStats.ZIndex    = 7
-TopStats.Text      = "DiamondX | V1.0 (Beta) | Free | -- fps | -- ms"
-
--- live fps / ping update
-RunService.RenderStepped:Connect(function()
-    local fps  = math.floor(1 / RunService.RenderStepped:Wait() * 10 + 0.5) / 10
-    local ping = math.floor(Stats and Stats.Network and Stats.Network.ServerStatsItem and
-                 Stats.Network.ServerStatsItem["Data Ping"] and
-                 Stats.Network.ServerStatsItem["Data Ping"].Value or 0)
-    TopStats.Text = string.format(
-        "DiamondX | V1.0 (Beta) | Free | %d fps | %d ms", fps, ping
-    )
-end)
-
-local TopSub = Instance.new("TextLabel", TopBar)
-TopSub.BackgroundTransparency = 1
-TopSub.Position  = UDim2.new(0, 8, 0, 14)
-TopSub.Size      = UDim2.new(1, -16, 0, 14)
-TopSub.Font      = Enum.Font.SourceSans
-TopSub.TextColor3 = C.textDim
-TopSub.TextSize  = 11
-TopSub.TextXAlignment = Enum.TextXAlignment.Left
-TopSub.ZIndex    = 7
-TopSub.Text      = "DiamondX Hub - discord.gg/diamondx"
-
--- close X
+-- close X  (bigger touch target on mobile)
+local CLOSE_SZ = IS_MOBILE and 28 or 18
 local CloseX = Instance.new("TextButton", TopBar)
 CloseX.BackgroundColor3 = C.red
 CloseX.BorderSizePixel  = 0
-CloseX.Position  = UDim2.new(1, -22, 0, 4)
-CloseX.Size      = UDim2.new(0, 18, 0, 18)
+CloseX.Position  = UDim2.new(1, -(CLOSE_SZ + 4), 0, (TOPBAR_H - CLOSE_SZ) / 2)
+CloseX.Size      = UDim2.new(0, CLOSE_SZ, 0, CLOSE_SZ)
 CloseX.Font      = Enum.Font.SourceSansBold
 CloseX.Text      = "X"
 CloseX.TextColor3 = Color3.new(1,1,1)
-CloseX.TextSize  = 11
+CloseX.TextSize  = IS_MOBILE and 14 or 11
 CloseX.ZIndex    = 8
 CloseX.MouseButton1Click:Connect(function()
-    Win.Visible = false
+    Win.Visible    = false
     ToggleBtn.Text = "Open UI"
 end)
 
 -- ─────────────────────────────────────────────
 --  TAB BAR
 -- ─────────────────────────────────────────────
+local TAB_BAR_H   = IS_MOBILE and 32 or 28
+local TAB_Y       = TOPBAR_H + 2
+local CONTENT_Y   = TAB_Y + TAB_BAR_H + 2
+local CONTENT_H   = WIN_H - CONTENT_Y - 4
+
 local TabBar = Instance.new("Frame", Win)
 TabBar.BackgroundTransparency = 1
-TabBar.Position = UDim2.new(0, 8, 0, 34)
-TabBar.Size     = UDim2.new(1, -16, 0, 30)
+TabBar.Position = UDim2.new(0, 4, 0, TAB_Y)
+TabBar.Size     = UDim2.new(1, -8, 0, TAB_BAR_H)
 TabBar.ZIndex   = 6
 
 local tabNames = {"Main","ESP","Visual","Character","Misc","UI Settings"}
 local tabPages  = {}
 local tabBtns   = {}
-
-local TAB_W = 1 / #tabNames
+local TAB_W     = 1 / #tabNames
 
 for i, name in ipairs(tabNames) do
-    -- button
     local tb = Instance.new("TextButton", TabBar)
-    tb.BorderColor3      = C.border
-    tb.BorderSizePixel   = 1
-    tb.BackgroundColor3  = (i==1) and C.tabActive or C.tabInactive
+    tb.BackgroundColor3 = (i==1) and C.tabActive or C.tabInactive
+    tb.BorderColor3     = C.border
+    tb.BorderSizePixel  = 1
     tb.Position  = UDim2.new((i-1)*TAB_W, 1, 0, 0)
     tb.Size      = UDim2.new(TAB_W, -2, 1, 0)
     tb.Font      = Enum.Font.SourceSansBold
     tb.Text      = name
     tb.TextColor3 = C.textMain
-    tb.TextSize  = 12
+    tb.TextSize  = TAB_FONT
     tb.ZIndex    = 7
+    -- truncate long tab names on narrow screens
+    tb.TextTruncate = Enum.TextTruncate.AtEnd
     tabBtns[name] = tb
 
-    -- page (scrolling)
     local pg = Instance.new("ScrollingFrame", Win)
     pg.Name                = name.."Page"
     pg.BackgroundColor3    = C.panel
     pg.BorderColor3        = C.border
     pg.BorderSizePixel     = 1
-    pg.Position            = UDim2.new(0, 8, 0, 68)
-    pg.Size                = UDim2.new(1, -16, 1, -76)
-    pg.CanvasSize          = UDim2.new(0, 0, 0, 500)
-    pg.ScrollBarThickness  = 4
-    pg.ScrollBarImageColor3 = C.sliderFill
+    pg.Position            = UDim2.new(0, 4, 0, CONTENT_Y)
+    pg.Size                = UDim2.new(1, -8, 0, CONTENT_H)
+    pg.CanvasSize          = UDim2.new(0, 0, 0, 600)
+    pg.ScrollBarThickness  = IS_MOBILE and 6 or 4
+    pg.ScrollBarImageColor3= C.sliderFill
+    pg.ScrollingDirection  = Enum.ScrollingDirection.Y
     pg.Visible             = (i==1)
     pg.ZIndex              = 6
     tabPages[name] = pg
@@ -281,70 +310,91 @@ end
 --  WIDGET HELPERS
 -- ─────────────────────────────────────────────
 
--- Group box (labeled border box like in screenshot)
-local function GroupBox(parent, title, w, h, x, y)
+local GBW = WIN_W - 24   -- group box width fills page minus padding
+
+local function GroupBox(parent, title, h, x, y)
     local f = Instance.new("Frame", parent)
     f.BackgroundColor3 = C.groupBg
     f.BorderColor3     = C.border
     f.BorderSizePixel  = 1
     f.Position = UDim2.new(0, x, 0, y)
-    f.Size     = UDim2.new(0, w, 0, h)
+    f.Size     = UDim2.new(0, GBW, 0, h)
     f.ZIndex   = 7
 
     local lbl = Instance.new("TextLabel", f)
     lbl.BackgroundTransparency = 1
-    lbl.Position  = UDim2.new(0, 10, 0, 6)
-    lbl.Size      = UDim2.new(1, -14, 0, 18)
+    lbl.Position  = UDim2.new(0, 10, 0, 4)
+    lbl.Size      = UDim2.new(1, -14, 0, 20)
     lbl.Font      = Enum.Font.SourceSansBold
     lbl.Text      = title
     lbl.TextColor3 = C.textHeader
-    lbl.TextSize  = 13
+    lbl.TextSize  = FONT_SZ_LG
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex    = 8
     return f
 end
 
--- Checkbox toggle
+-- Checkbox with oversized invisible touch hitbox
 local function Checkbox(parent, label, configKey, y)
-    local box = Instance.new("TextButton", parent)
+    -- invisible tap-zone (full row width, finger-friendly height)
+    local hitbox = Instance.new("TextButton", parent)
+    hitbox.BackgroundTransparency = 1
+    hitbox.BorderSizePixel = 0
+    hitbox.Position = UDim2.new(0, 0, 0, y - 4)
+    hitbox.Size     = UDim2.new(1, 0, 0, TAP_H)
+    hitbox.Text     = ""
+    hitbox.ZIndex   = 10
+
+    -- visible checkbox square
+    local box = Instance.new("Frame", parent)
     box.BackgroundColor3 = Config[configKey] and C.checkOn or C.checkOff
     box.BorderColor3     = C.border
     box.BorderSizePixel  = 1
-    box.Position = UDim2.new(0, 10, 0, y)
-    box.Size     = UDim2.new(0, 14, 0, 14)
-    box.Text     = ""
+    box.Position = UDim2.new(0, 10, 0, y + (TAP_H - CHECK_SZ)/2 - 4)
+    box.Size     = UDim2.new(0, CHECK_SZ, 0, CHECK_SZ)
     box.ZIndex   = 9
+
+    local tick = Instance.new("TextLabel", box)
+    tick.BackgroundTransparency = 1
+    tick.Size      = UDim2.new(1,0,1,0)
+    tick.Font      = Enum.Font.SourceSansBold
+    tick.Text      = Config[configKey] and "✓" or ""
+    tick.TextColor3 = Color3.new(1,1,1)
+    tick.TextSize  = CHECK_SZ - 4
+    tick.ZIndex    = 10
 
     local lbl = Instance.new("TextLabel", parent)
     lbl.BackgroundTransparency = 1
-    lbl.Position  = UDim2.new(0, 30, 0, y - 2)
-    lbl.Size      = UDim2.new(1, -36, 0, 18)
+    lbl.Position  = UDim2.new(0, CHECK_SZ + 16, 0, y - 2)
+    lbl.Size      = UDim2.new(1, -(CHECK_SZ + 20), 0, TAP_H)
     lbl.Font      = Enum.Font.SourceSans
     lbl.Text      = label
     lbl.TextColor3 = C.textMain
-    lbl.TextSize  = 13
+    lbl.TextSize  = FONT_SZ_LG
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex    = 9
 
-    box.MouseButton1Click:Connect(function()
+    hitbox.MouseButton1Click:Connect(function()
         Config[configKey] = not Config[configKey]
         box.BackgroundColor3 = Config[configKey] and C.checkOn or C.checkOff
+        tick.Text = Config[configKey] and "✓" or ""
     end)
-    return box
 end
 
--- Horizontal slider  (returns frame, value label)
+-- Slider  — full touch drag, fires on Touch AND MouseMovement
+local SLIDER_W = GBW - 20
+
 local function Slider(parent, label, configKey, minV, maxV, y)
-    local TRACK_W = 160
+    local rowH = TAP_H + 22
 
     local lbl = Instance.new("TextLabel", parent)
     lbl.BackgroundTransparency = 1
     lbl.Position  = UDim2.new(0, 10, 0, y)
-    lbl.Size      = UDim2.new(0, TRACK_W, 0, 14)
+    lbl.Size      = UDim2.new(0, SLIDER_W, 0, 18)
     lbl.Font      = Enum.Font.SourceSans
     lbl.Text      = label .. ": " .. tostring(Config[configKey])
     lbl.TextColor3 = C.textMain
-    lbl.TextSize  = 12
+    lbl.TextSize  = FONT_SZ_SM
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex    = 9
 
@@ -352,22 +402,44 @@ local function Slider(parent, label, configKey, minV, maxV, y)
     track.BackgroundColor3 = C.sliderBg
     track.BorderColor3     = C.border
     track.BorderSizePixel  = 1
-    track.Position = UDim2.new(0, 10, 0, y + 16)
-    track.Size     = UDim2.new(0, TRACK_W, 0, 14)
+    track.Position = UDim2.new(0, 10, 0, y + 20)
+    track.Size     = UDim2.new(0, SLIDER_W, 0, IS_MOBILE and 20 or 14)
     track.ZIndex   = 9
 
     local fill = Instance.new("Frame", track)
     fill.BackgroundColor3 = C.sliderFill
     fill.BorderSizePixel  = 0
-    fill.Size  = UDim2.new((Config[configKey] - minV)/(maxV - minV), 0, 1, 0)
-    fill.ZIndex = 10
+    fill.Size    = UDim2.new((Config[configKey] - minV)/(maxV - minV), 0, 1, 0)
+    fill.ZIndex  = 10
 
-    -- drag logic
+    -- thumb dot
+    local thumb = Instance.new("Frame", track)
+    thumb.BackgroundColor3 = Color3.new(1,1,1)
+    thumb.BorderSizePixel  = 0
+    thumb.AnchorPoint      = Vector2.new(0.5, 0.5)
+    thumb.Size   = UDim2.new(0, IS_MOBILE and 16 or 10, 0, IS_MOBILE and 16 or 10)
+    thumb.Position = UDim2.new((Config[configKey]-minV)/(maxV-minV), 0, 0.5, 0)
+    thumb.ZIndex = 11
+    local tc = Instance.new("UICorner", thumb); tc.CornerRadius = UDim.new(1,0)
+
     local sliding = false
+
+    local function applyX(screenX)
+        local absX   = track.AbsolutePosition.X
+        local absW   = track.AbsoluteSize.X
+        local rel    = math.clamp((screenX - absX) / absW, 0, 1)
+        local val    = math.floor(rel * (maxV - minV) + minV + 0.5)
+        Config[configKey] = val
+        fill.Size     = UDim2.new(rel, 0, 1, 0)
+        thumb.Position = UDim2.new(rel, 0, 0.5, 0)
+        lbl.Text      = label .. ": " .. tostring(val)
+    end
+
     track.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1
         or i.UserInputType == Enum.UserInputType.Touch then
             sliding = true
+            applyX(i.Position.X)
         end
     end)
     track.InputEnded:Connect(function(i)
@@ -376,86 +448,100 @@ local function Slider(parent, label, configKey, minV, maxV, y)
             sliding = false
         end
     end)
+    -- global move so finger can leave the track frame and still drag
     UserInputService.InputChanged:Connect(function(i)
         if not sliding then return end
-        if i.UserInputType ~= Enum.UserInputType.MouseMovement
-        and i.UserInputType ~= Enum.UserInputType.Touch then return end
-        local absPos = track.AbsolutePosition.X
-        local absSize = track.AbsoluteSize.X
-        local rel = math.clamp((i.Position.X - absPos) / absSize, 0, 1)
-        local val = math.floor(rel * (maxV - minV) + minV + 0.5)
-        Config[configKey] = val
-        fill.Size = UDim2.new(rel, 0, 1, 0)
-        lbl.Text  = label .. ": " .. tostring(val)
+        if i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch then
+            applyX(i.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
     end)
 end
 
 -- ─────────────────────────────────────────────
---  POPULATE: MAIN TAB
---  Layout mirrors screenshot: Ragebot (left) | Wallbang (right)
+--  ROW SPACING HELPER
 -- ─────────────────────────────────────────────
-local mainPage = tabPages["Main"]
-
--- Ragebot group — matches screenshot exactly
-local rageGroup = GroupBox(mainPage, "Ragebot", 490, 210, 8, 8)
-Checkbox(rageGroup, "Enable",       "RagebotEnabled", 30)
-Checkbox(rageGroup, "Orbit",        "Orbit",           54)
-Checkbox(rageGroup, "Desync (Beta)","Desync",          78)
-Slider(rageGroup,   "Attack", "AttackTick", 1, 10, 106)
-Slider(rageGroup,   "Hide",   "HideTick",   1, 10, 150)
-
--- Wallbang group — right column, same row
-local wallGroup = GroupBox(mainPage, "Wallbang", 500, 80, 8, 230)
-Checkbox(wallGroup, "Enable", "Wallbang", 30)
+local function cbY(index)  return 28 + (index-1) * (TAP_H + 4) end
+local function slY(index)  return 28 + (index-1) * (TAP_H + 28) end
 
 -- ─────────────────────────────────────────────
---  POPULATE: ESP TAB
+--  MAIN TAB
 -- ─────────────────────────────────────────────
-local espPage = tabPages["ESP"]
-local espGroup = GroupBox(espPage, "ESP Options", 490, 165, 8, 8)
-Checkbox(espGroup, "Enable ESP",    "ESPEnabled", 30)
-Checkbox(espGroup, "Boxes",         "ESPBoxes",   54)
-Checkbox(espGroup, "Names",         "ESPNames",   78)
-Checkbox(espGroup, "Health Bars",   "ESPHealth",  102)
-Checkbox(espGroup, "Tracers",       "ESPTracers", 126)
+local mp = tabPages["Main"]
+
+local rageH = 28 + 3*(TAP_H+4) + 2*(TAP_H+28) + 12
+local rageGroup = GroupBox(mp, "Ragebot", rageH, 8, 8)
+Checkbox(rageGroup, "Enable",        "RagebotEnabled", cbY(1))
+Checkbox(rageGroup, "Orbit",         "Orbit",          cbY(2))
+Checkbox(rageGroup, "Desync (Beta)", "Desync",         cbY(3))
+local sBase = cbY(3) + TAP_H + 8
+Slider(rageGroup, "Attack", "AttackTick", 1, 10, sBase)
+Slider(rageGroup, "Hide",   "HideTick",   1, 10, sBase + TAP_H + 28)
+
+local wallH = 28 + TAP_H + 12
+local wallGroup = GroupBox(mp, "Wallbang", wallH, 8, rageH + 16)
+Checkbox(wallGroup, "Enable", "Wallbang", cbY(1))
 
 -- ─────────────────────────────────────────────
---  POPULATE: VISUAL TAB
+--  ESP TAB
 -- ─────────────────────────────────────────────
-local visPage = tabPages["Visual"]
-local visGroup = GroupBox(visPage, "Visuals", 490, 115, 8, 8)
-Checkbox(visGroup, "No Recoil",  "NoRecoil",  30)
-Checkbox(visGroup, "No Spread",  "NoSpread",  54)
-Checkbox(visGroup, "Full Bright","FullBright", 78)
+local ep = tabPages["ESP"]
+local espH = 28 + 5*(TAP_H+4) + 12
+local espGroup = GroupBox(ep, "ESP Options", espH, 8, 8)
+Checkbox(espGroup, "Enable ESP",   "ESPEnabled", cbY(1))
+Checkbox(espGroup, "Boxes",        "ESPBoxes",   cbY(2))
+Checkbox(espGroup, "Names",        "ESPNames",   cbY(3))
+Checkbox(espGroup, "Health Bars",  "ESPHealth",  cbY(4))
+Checkbox(espGroup, "Tracers",      "ESPTracers", cbY(5))
 
 -- ─────────────────────────────────────────────
---  POPULATE: CHARACTER TAB
+--  VISUAL TAB
 -- ─────────────────────────────────────────────
-local charPage = tabPages["Character"]
-local movGroup = GroupBox(charPage, "Movement", 490, 200, 8, 8)
-Checkbox(movGroup, "Fly",            "Fly",          30)
-Slider(movGroup,   "Fly Speed", "FlySpeed", 10, 200,   50)
-Checkbox(movGroup, "Infinite Jump",  "InfiniteJump", 98)
-Checkbox(movGroup, "Noclip",         "Noclip",       122)
-Checkbox(movGroup, "Speed Hack",     "SpeedHack",    146)
-Slider(movGroup,   "Walk Speed", "WalkSpeed", 16, 200, 166)
+local vp = tabPages["Visual"]
+local visH = 28 + 3*(TAP_H+4) + 12
+local visGroup = GroupBox(vp, "Visuals", visH, 8, 8)
+Checkbox(visGroup, "No Recoil",   "NoRecoil",   cbY(1))
+Checkbox(visGroup, "No Spread",   "NoSpread",   cbY(2))
+Checkbox(visGroup, "Full Bright", "FullBright", cbY(3))
 
 -- ─────────────────────────────────────────────
---  POPULATE: MISC TAB
+--  CHARACTER TAB
 -- ─────────────────────────────────────────────
-local miscPage = tabPages["Misc"]
-local miscGroup = GroupBox(miscPage, "Utility", 490, 115, 8, 8)
-Checkbox(miscGroup, "Rapid Fire",  "RapidFire",  30)
-Checkbox(miscGroup, "Fast Attack", "FastAttack", 54)
-Checkbox(miscGroup, "Auto Parry",  "AutoParry",  78)
+local cp = tabPages["Character"]
+local movH = 28 + 3*(TAP_H+4) + 2*(TAP_H+28) + 12
+local movGroup = GroupBox(cp, "Movement", movH, 8, 8)
+Checkbox(movGroup, "Fly",           "Fly",          cbY(1))
+Slider(movGroup,   "Fly Speed",     "FlySpeed",  10, 200, cbY(1) + TAP_H + 4)
+local cBase2 = cbY(1) + TAP_H + 4 + TAP_H + 28
+Checkbox(movGroup, "Infinite Jump", "InfiniteJump", cBase2)
+Checkbox(movGroup, "Noclip",        "Noclip",       cBase2 + TAP_H + 4)
+Checkbox(movGroup, "Speed Hack",    "SpeedHack",    cBase2 + (TAP_H+4)*2)
+Slider(movGroup,   "Walk Speed",    "WalkSpeed", 16, 200, cBase2 + (TAP_H+4)*3)
 
 -- ─────────────────────────────────────────────
---  POPULATE: UI SETTINGS TAB
+--  MISC TAB
 -- ─────────────────────────────────────────────
-local uiPage = tabPages["UI Settings"]
-local uiGroup = GroupBox(uiPage, "Interface", 490, 80, 8, 8)
-Checkbox(uiGroup, "Lock UI Position", "UILocked", 30)
-Checkbox(uiGroup, "Hide on Spawn",    "UIHidden",  54)
+local msp = tabPages["Misc"]
+local miscH = 28 + 3*(TAP_H+4) + 12
+local miscGroup = GroupBox(msp, "Utility", miscH, 8, 8)
+Checkbox(miscGroup, "Rapid Fire",  "RapidFire",  cbY(1))
+Checkbox(miscGroup, "Fast Attack", "FastAttack", cbY(2))
+Checkbox(miscGroup, "Auto Parry",  "AutoParry",  cbY(3))
+
+-- ─────────────────────────────────────────────
+--  UI SETTINGS TAB
+-- ─────────────────────────────────────────────
+local uip = tabPages["UI Settings"]
+local uiH = 28 + 2*(TAP_H+4) + 12
+local uiGroup = GroupBox(uip, "Interface", uiH, 8, 8)
+Checkbox(uiGroup, "Lock UI Position", "UILocked", cbY(1))
+Checkbox(uiGroup, "Hide on Spawn",    "UIHidden",  cbY(2))
 
 -- ─────────────────────────────────────────────
 --  SIDEBAR LOGIC
@@ -465,7 +551,6 @@ ToggleBtn.MouseButton1Click:Connect(function()
     Win.Visible     = not Config.UIHidden
     ToggleBtn.Text  = Config.UIHidden and "Open UI" or "Toggle UI"
 end)
-
 UnlockBtn.MouseButton1Click:Connect(function()
     Config.UILocked = not Config.UILocked
     UnlockBtn.Text  = Config.UILocked and "Lock UI" or "Unlock UI"
@@ -475,22 +560,19 @@ end)
 --  CORE LOGIC
 -- ─────────────────────────────────────────────
 
--- Desync: hold offset for ~100ms across heartbeats (not single-frame no-op)
+-- Desync: persistent offset, refreshed every 100ms
 local desyncOffset = Vector3.new(0,0,0)
 local desyncClock  = 0
 RunService.Heartbeat:Connect(function(dt)
-    local char     = LocalPlayer.Character
+    local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     if not root then return end
-
     if Config.Desync then
         desyncClock = desyncClock + dt
         if desyncClock >= 0.1 then
             desyncOffset = Vector3.new(
-                math.random(-14,14),
-                math.random(-4, 4),
-                math.random(-14,14)
+                math.random(-14,14), math.random(-4,4), math.random(-14,14)
             )
             desyncClock = 0
         end
@@ -498,24 +580,24 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
--- RenderStepped: weapon patches + fly + ragebot hooks
+-- Main per-frame loop
 RunService.RenderStepped:Connect(function()
     local char = LocalPlayer.Character
     if not char then return end
-    local root     = char:FindFirstChild("HumanoidRootPart")
+    local root     = char:FindFirstChild("HumanoidRootPart")   -- fresh each frame
     local humanoid = char:FindFirstChildOfClass("Humanoid")
 
-    -- weapon value patching (cached scan each frame only when flags on)
-    if Config.RapidFire or Config.FastAttack or Config.NoRecoil or Config.NoSpread then
+    -- weapon patches
+    if Config.RapidFire or Config.NoRecoil or Config.NoSpread then
         pcall(function()
             for _, tool in ipairs(char:GetChildren()) do
                 if tool:IsA("Tool") then
                     for _, v in ipairs(tool:GetDescendants()) do
                         if v:IsA("NumberValue") or v:IsA("IntValue") then
                             local n = v.Name:lower()
-                            if Config.RapidFire  and (n:find("cooldown") or n:find("firerate") or n:find("rate")) then v.Value = 0.01 end
-                            if Config.NoRecoil   and (n:find("recoil")   or n:find("kick"))    then v.Value = 0    end
-                            if Config.NoSpread   and (n:find("spread")   or n:find("accuracy") or n:find("inaccuracy")) then v.Value = 0 end
+                            if Config.RapidFire and (n:find("cooldown") or n:find("rate")) then v.Value = 0.01 end
+                            if Config.NoRecoil  and (n:find("recoil")   or n:find("kick")) then v.Value = 0    end
+                            if Config.NoSpread  and (n:find("spread")   or n:find("accuracy") or n:find("inaccuracy")) then v.Value = 0 end
                         end
                     end
                 end
@@ -528,80 +610,72 @@ RunService.RenderStepped:Connect(function()
         humanoid.PlatformStand = true
         local md = humanoid.MoveDirection
         root.AssemblyLinearVelocity = Vector3.new(
-            md.X * Config.FlySpeed,
-            0,
-            md.Z * Config.FlySpeed
+            md.X * Config.FlySpeed, 0, md.Z * Config.FlySpeed
         )
-    elseif humanoid and not Config.Fly and humanoid.PlatformStand then
+    elseif humanoid and humanoid.PlatformStand and not Config.Fly then
         humanoid.PlatformStand = false
     end
 
-    -- speed hack
+    -- speed
     if Config.SpeedHack and humanoid then
         humanoid.WalkSpeed = Config.WalkSpeed
     end
 
     -- noclip
-    if Config.Noclip and char then
+    if Config.Noclip then
         for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") then
-                p.CanCollide = false
-            end
+            if p:IsA("BasePart") then p.CanCollide = false end
         end
     end
 
     -- fullbright
     if Config.FullBright then
         pcall(function()
-            game:GetService("Lighting").Brightness    = 2
-            game:GetService("Lighting").ClockTime     = 14
-            game:GetService("Lighting").FogEnd        = 100000
-            game:GetService("Lighting").GlobalShadows = false
-            game:GetService("Lighting").Ambient       = Color3.new(1,1,1)
+            local L = game:GetService("Lighting")
+            L.Brightness = 2; L.ClockTime = 14
+            L.FogEnd = 100000; L.GlobalShadows = false
+            L.Ambient = Color3.new(1,1,1)
         end)
     end
 end)
 
 -- Infinite Jump
 UserInputService.JumpRequest:Connect(function()
-    if Config.InfiniteJump then
-        local char = LocalPlayer.Character
-        if char then
-            local h = char:FindFirstChildOfClass("Humanoid")
-            if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-        end
+    if not Config.InfiniteJump then return end
+    local char = LocalPlayer.Character
+    if char then
+        local h = char:FindFirstChildOfClass("Humanoid")
+        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
     end
 end)
 
--- ESP loop (basic box + name overhead)
+-- ESP  (BillboardGui pool, cleaned each frame)
 RunService.RenderStepped:Connect(function()
-    -- clean old tags
     for _, v in ipairs(CoreGui:GetChildren()) do
         if v.Name == "DX_ESP" then v:Destroy() end
     end
     if not Config.ESPEnabled then return end
-
     local cam = workspace.CurrentCamera
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then
-            local root = plr.Character:FindFirstChild("HumanoidRootPart")
-            if root then
-                local pos, onScreen = cam:WorldToViewportPoint(root.Position)
+            local r = plr.Character:FindFirstChild("HumanoidRootPart")
+            if r then
+                local _, onScreen = cam:WorldToViewportPoint(r.Position)
                 if onScreen then
                     local tag = Instance.new("BillboardGui", CoreGui)
                     tag.Name        = "DX_ESP"
-                    tag.Adornee     = root
-                    tag.Size        = UDim2.new(0, 80, 0, 20)
+                    tag.Adornee     = r
+                    tag.Size        = UDim2.new(0, 100, 0, 24)
                     tag.StudsOffset = Vector3.new(0, 3.5, 0)
                     tag.AlwaysOnTop = true
                     if Config.ESPNames then
                         local nl = Instance.new("TextLabel", tag)
                         nl.BackgroundTransparency = 1
-                        nl.Size      = UDim2.new(1,0,1,0)
-                        nl.Text      = plr.Name
+                        nl.Size       = UDim2.new(1,0,1,0)
+                        nl.Text       = plr.Name
                         nl.TextColor3 = Color3.fromRGB(255,80,80)
-                        nl.TextSize  = 14
-                        nl.Font      = Enum.Font.SourceSansBold
+                        nl.TextSize   = IS_MOBILE and 16 or 13
+                        nl.Font       = Enum.Font.SourceSansBold
                     end
                 end
             end
@@ -610,4 +684,5 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ─────────────────────────────────────────────
-print("[DiamondX] Loaded — tabs: Main ESP Visual Character Misc UI Settings")
+print(string.format("[DiamondX v1.1] Mobile=%s  WIN=%dx%d  TAP_H=%d",
+    tostring(IS_MOBILE), WIN_W, WIN_H, TAP_H))
