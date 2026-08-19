@@ -1,324 +1,564 @@
--- DiamondX v1: Mobile Optimized Script (Working Fly, Desync, & Open/Close UI)
-local CoreGui = game:GetService("CoreGui")
+-- DiamondX Hub | Mobile Roblox Executor Script
+-- Layout: exact replica of Nesix Hub screenshot
+-- Tabs: Main, ESP, Visual, Character, Misc, UI Settings
+
+local CoreGui         = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local Stats = game:GetService("Stats")
+local RunService      = game:GetService("RunService")
+local Players         = game:GetService("Players")
+local LocalPlayer     = Players.LocalPlayer
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-
--- Configuration
+-- ─────────────────────────────────────────────
+--  CONFIG
+-- ─────────────────────────────────────────────
 local Config = {
-    UIHidden = false,
-    UILocked = false,
-    RagebotEnable = false,
-    Orbit = false,
-    Desync = false,
-    Fly = false,
-    FlySpeed = 50,
-    FlyAltitude = 0, -- Controlled by mobile Up/Down buttons
-    OrbitOffsetX = 0,
-    OrbitOffsetY = 2,
-    OrbitOffsetZ = 0,
-    Noclip = false,
-    InfiniteJump = false
+    -- Ragebot (Main)
+    RagebotEnabled = false,
+    Orbit          = false,
+    Desync         = false,
+    AttackTick     = 1,   -- slider 1-10
+    HideTick       = 1,   -- slider 1-10
+
+    -- Wallbang (Main)
+    Wallbang       = false,
+
+    -- ESP
+    ESPEnabled     = false,
+    ESPBoxes       = false,
+    ESPNames       = false,
+    ESPHealth      = false,
+    ESPTracers     = false,
+
+    -- Visual
+    NoRecoil       = false,
+    NoSpread       = false,
+    FullBright     = false,
+
+    -- Character
+    Fly            = false,
+    FlySpeed       = 50,
+    InfiniteJump   = false,
+    Noclip         = false,
+    SpeedHack      = false,
+    WalkSpeed      = 16,
+
+    -- Misc
+    RapidFire      = false,
+    FastAttack     = false,
+    AutoParry      = false,
+
+    -- UI
+    UILocked       = false,
+    UIHidden       = false,
 }
 
--- Cleanup old GUI if it exists
-if CoreGui:FindFirstChild("DiamondXHubMobile") then
-    CoreGui.DiamondXHubMobile:Destroy()
+-- ─────────────────────────────────────────────
+--  CLEANUP
+-- ─────────────────────────────────────────────
+if CoreGui:FindFirstChild("DiamondXHub") then
+    CoreGui.DiamondXHub:Destroy()
 end
 
+-- ─────────────────────────────────────────────
+--  ROOT GUI
+-- ─────────────────────────────────────────────
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DiamondXHubMobile"
-ScreenGui.Parent = CoreGui
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Name            = "DiamondXHub"
+ScreenGui.Parent          = CoreGui
+ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn    = false
 
--- Main Mobile Window
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 12, 22)
-MainFrame.BorderColor3 = Color3.fromRGB(65, 45, 95)
-MainFrame.BorderSizePixel = 1
-MainFrame.Position = UDim2.new(0.5, -170, 0.5, -190)
-MainFrame.Size = UDim2.new(0, 340, 0, 400)
-MainFrame.Active = true
+-- ─────────────────────────────────────────────
+--  COLOURS  (pulled from screenshot)
+-- ─────────────────────────────────────────────
+local C = {
+    bg          = Color3.fromRGB(13,  15,  30),   -- near-black navy
+    panel       = Color3.fromRGB(18,  20,  40),   -- slightly lighter panel
+    border      = Color3.fromRGB(80,  60, 160),   -- purple border
+    tabActive   = Color3.fromRGB(22,  24,  48),   -- active tab bg
+    tabInactive = Color3.fromRGB(13,  15,  30),   -- inactive tab bg
+    groupBg     = Color3.fromRGB(16,  18,  36),   -- group box fill
+    sliderFill  = Color3.fromRGB(90,  60, 180),   -- purple slider
+    sliderBg    = Color3.fromRGB(28,  22,  55),   -- slider track
+    checkOn     = Color3.fromRGB(90,  60, 180),
+    checkOff    = Color3.fromRGB(28,  22,  55),
+    textMain    = Color3.fromRGB(220, 215, 240),
+    textDim     = Color3.fromRGB(150, 140, 175),
+    textHeader  = Color3.fromRGB(255, 255, 255),
+    sidebarBg   = Color3.fromRGB(10,  12,  26),
+    topbar      = Color3.fromRGB(10,  12,  26),
+    red         = Color3.fromRGB(180,  40,  40),
+}
 
--- Mobile-Friendly Draggable Support
-local dragging, dragInput, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
+-- ─────────────────────────────────────────────
+--  SIDEBAR  (Toggle UI / Unlock UI)
+-- ─────────────────────────────────────────────
+local Sidebar = Instance.new("Frame", ScreenGui)
+Sidebar.Name               = "Sidebar"
+Sidebar.BackgroundColor3   = C.sidebarBg
+Sidebar.BorderColor3       = C.border
+Sidebar.BorderSizePixel    = 1
+Sidebar.Position           = UDim2.new(0, 0, 0.28, 0)
+Sidebar.Size               = UDim2.new(0, 90, 0, 72)
+Sidebar.ZIndex             = 10
+
+local function makeSideBtn(text, yOff)
+    local b = Instance.new("TextButton", Sidebar)
+    b.BackgroundColor3  = C.sidebarBg
+    b.BorderColor3      = C.border
+    b.BorderSizePixel   = 1
+    b.Position          = UDim2.new(0, 0, 0, yOff)
+    b.Size              = UDim2.new(1, 0, 0, 35)
+    b.Font              = Enum.Font.SourceSansBold
+    b.Text              = text
+    b.TextColor3        = C.textMain
+    b.TextSize          = 13
+    b.ZIndex            = 11
+    return b
+end
+
+local ToggleBtn  = makeSideBtn("Toggle UI",  0)
+local UnlockBtn  = makeSideBtn("Unlock UI", 36)
+
+-- ─────────────────────────────────────────────
+--  MAIN WINDOW
+-- ─────────────────────────────────────────────
+local Win = Instance.new("Frame", ScreenGui)
+Win.Name              = "MainWindow"
+Win.BackgroundColor3  = C.bg
+Win.BorderColor3      = C.border
+Win.BorderSizePixel   = 2
+Win.Position          = UDim2.new(0.5, -520, 0.5, -210)
+Win.Size              = UDim2.new(0, 1040, 0, 420)
+Win.Active            = true
+Win.ZIndex            = 5
+
+-- ── dragging ──
+local drag, dragStart, winStart
+Win.InputBegan:Connect(function(i)
     if Config.UILocked then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
+        drag      = true
+        dragStart = i.Position
+        winStart  = Win.Position
+        i.Changed:Connect(function()
+            if i.UserInputState == Enum.UserInputState.End then drag = false end
         end)
     end
 end)
-
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
+local lastDragInput
+Win.InputChanged:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseMovement
+    or i.UserInputType == Enum.UserInputType.Touch then
+        lastDragInput = i
     end
 end)
-
-UserInputService.InputChanged:Connect(function(input)
+UserInputService.InputChanged:Connect(function(i)
     if Config.UILocked then return end
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    if i == lastDragInput and drag then
+        local d = i.Position - dragStart
+        Win.Position = UDim2.new(
+            winStart.X.Scale, winStart.X.Offset + d.X,
+            winStart.Y.Scale, winStart.Y.Offset + d.Y
+        )
     end
 end)
 
--- Top Bar (DiamondX v1 branding + Live stats)
-local TopBar = Instance.new("Frame", MainFrame)
-TopBar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
-TopBar.BorderColor3 = Color3.fromRGB(65, 45, 95)
-TopBar.Position = UDim2.new(0, 8, 0, 8)
-TopBar.Size = UDim2.new(1, -16, 0, 24)
+-- ─────────────────────────────────────────────
+--  TOP BAR  (version / stats strip)
+-- ─────────────────────────────────────────────
+local TopBar = Instance.new("Frame", Win)
+TopBar.BackgroundColor3  = C.topbar
+TopBar.BorderColor3      = C.border
+TopBar.BorderSizePixel   = 1
+TopBar.Size              = UDim2.new(1, 0, 0, 28)
+TopBar.ZIndex            = 6
 
-local TopBarText = Instance.new("TextLabel", TopBar)
-TopBarText.BackgroundTransparency = 1
-TopBarText.Size = UDim2.new(1, 0, 1, 0)
-TopBarText.Font = Enum.Font.Code
-TopBarText.Text = "DiamondX v1 | Free"
-TopBarText.TextColor3 = Color3.fromRGB(200, 190, 220)
-TopBarText.TextSize = 11
+local TopStats = Instance.new("TextLabel", TopBar)
+TopStats.BackgroundTransparency = 1
+TopStats.Position  = UDim2.new(0, 8, 0, 0)
+TopStats.Size      = UDim2.new(0.6, 0, 1, 0)
+TopStats.Font      = Enum.Font.SourceSansBold
+TopStats.TextColor3 = C.textMain
+TopStats.TextSize  = 12
+TopStats.TextXAlignment = Enum.TextXAlignment.Left
+TopStats.ZIndex    = 7
+TopStats.Text      = "DiamondX | V1.0 (Beta) | Free | -- fps | -- ms"
 
--- Dynamic FPS & Ping Tracker
-task.spawn(function()
-    while true do
-        pcall(function()
-            local fps = math.floor(1 / RunService.RenderStepped:Wait())
-            local pingVal = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-            TopBarText.Text = string.format("DiamondX v1 | Free | %d fps | %d ms", fps, math.floor(pingVal))
-        end)
-        task.wait(0.6)
-    end
-end)
-
--- Scrolling Container for Mobile Options
-local ScrollContainer = Instance.new("ScrollingFrame", MainFrame)
-ScrollContainer.BackgroundTransparency = 1
-ScrollContainer.Position = UDim2.new(0, 8, 0, 40)
-ScrollContainer.Size = UDim2.new(1, -16, 1, -48)
-ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, 520)
-ScrollContainer.ScrollBarThickness = 4
-
--- Helper to make mobile buttons / toggles
-local function createMobileToggle(name, configKey, yPos)
-    local btn = Instance.new("TextButton", ScrollContainer)
-    btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
-    btn.BorderColor3 = Color3.fromRGB(65, 45, 95)
-    btn.Position = UDim2.new(0, 5, 0, yPos)
-    btn.Size = UDim2.new(0, 16, 0, 16)
-    btn.Text = ""
-
-    local lbl = Instance.new("TextLabel", ScrollContainer)
-    lbl.BackgroundTransparency = 1
-    lbl.Position = UDim2.new(0, 28, 0, yPos - 2)
-    lbl.Size = UDim2.new(0, 250, 0, 20)
-    lbl.Font = Enum.Font.SourceSansBold
-    lbl.Text = name
-    lbl.TextColor3 = Color3.fromRGB(210, 200, 230)
-    lbl.TextSize = 14
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    btn.MouseButton1Click:Connect(function()
-        Config[configKey] = not Config[configKey]
-        btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
-        
-        -- Reset fly altitude when turning on fly
-        if configKey == "Fly" and Config.Fly then
-            local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                Config.FlyAltitude = char.HumanoidRootPart.Position.Y
-            end
-        end
-    end)
-end
-
--- Helper for mobile sliders
-local function createMobileSlider(name, configKey, min, max, yPos)
-    local lbl = Instance.new("TextLabel", ScrollContainer)
-    lbl.BackgroundTransparency = 1
-    lbl.Position = UDim2.new(0, 5, 0, yPos)
-    lbl.Size = UDim2.new(1, -10, 0, 16)
-    lbl.Font = Enum.Font.SourceSans
-    lbl.Text = name .. ": " .. tostring(Config[configKey])
-    lbl.TextColor3 = Color3.fromRGB(200, 190, 220)
-    lbl.TextSize = 13
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local bar = Instance.new("Frame", ScrollContainer)
-    bar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
-    bar.BorderColor3 = Color3.fromRGB(65, 45, 95)
-    bar.Position = UDim2.new(0, 5, 0, yPos + 18)
-    bar.Size = UDim2.new(1, -20, 0, 16)
-
-    local fill = Instance.new("Frame", bar)
-    fill.BackgroundColor3 = Color3.fromRGB(85, 65, 140)
-    fill.BorderSizePixel = 0
-    local initialPos = math.clamp((Config[configKey] - min) / (max - min), 0, 1)
-    fill.Size = UDim2.new(initialPos, 0, 1, 0)
-
-    local draggingSlider = false
-    bar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingSlider = true
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingSlider = false
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local absoluteSizeX = bar.AbsoluteSize.X
-            if absoluteSizeX > 0 then
-                local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / absoluteSizeX, 0, 1)
-                Config[configKey] = math.floor(min + (max - min) * pos)
-                fill.Size = UDim2.new(pos, 0, 1, 0)
-                lbl.Text = name .. ": " .. tostring(Config[configKey])
-            end
-        end
-    end)
-end
-
--- Build Controls on Mobile Menu
-createMobileToggle("Enable Ragebot", "RagebotEnable", 10)
-createMobileToggle("Active Orbit Lock", "Orbit", 38)
-createMobileToggle("Enable Desync (Jitter)", "Desync", 66)
-createMobileToggle("Enable Fly", "Fly", 94)
-createMobileToggle("Noclip", "Noclip", 122)
-createMobileToggle("Infinite Jump", "InfiniteJump", 150)
-createMobileToggle("Lock UI Position", "UILocked", 178)
-
-createMobileSlider("Fly Speed", "FlySpeed", 10, 150, 215)
-createMobileSlider("Orbit Offset X", "OrbitOffsetX", -15, 15, 270)
-createMobileSlider("Orbit Offset Y", "OrbitOffsetY", -15, 15, 325)
-createMobileSlider("Orbit Offset Z", "OrbitOffsetZ", -15, 15, 380)
-
--- Dedicated Mobile Fly Up/Down Controls inside menu
-local flyUpBtn = Instance.new("TextButton", ScrollContainer)
-flyUpBtn.BackgroundColor3 = Color3.fromRGB(35, 25, 55)
-flyUpBtn.BorderColor3 = Color3.fromRGB(65, 45, 95)
-flyUpBtn.Position = UDim2.new(0, 5, 0, 435)
-flyUpBtn.Size = UDim2.new(0, 140, 0, 30)
-flyUpBtn.Font = Enum.Font.SourceSansBold
-flyUpBtn.Text = "Fly UP ⬆"
-flyUpBtn.TextColor3 = Color3.fromRGB(220, 210, 240)
-flyUpBtn.TextSize = 13
-flyUpBtn.MouseButton1Down:Connect(function()
-    Config.FlyAltitude = Config.FlyAltitude + 4
-end)
-
-local flyDownBtn = Instance.new("TextButton", ScrollContainer)
-flyDownBtn.BackgroundColor3 = Color3.fromRGB(35, 25, 55)
-flyDownBtn.BorderColor3 = Color3.fromRGB(65, 45, 95)
-flyDownBtn.Position = UDim2.new(0, 155, 0, 435)
-flyDownBtn.Size = UDim2.new(0, 140, 0, 30)
-flyDownBtn.Font = Enum.Font.SourceSansBold
-flyDownBtn.Text = "Fly DOWN ⬇"
-flyDownBtn.TextColor3 = Color3.fromRGB(220, 210, 240)
-flyDownBtn.TextSize = 13
-flyDownBtn.MouseButton1Down:Connect(function()
-    Config.FlyAltitude = Config.FlyAltitude - 4
-end)
-
--- Floating Mobile Close/Open Toggle Button (Toggle UI On/Off)
-local FloatButton = Instance.new("TextButton", ScreenGui)
-FloatButton.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
-FloatButton.BorderColor3 = Color3.fromRGB(65, 45, 95)
-FloatButton.Position = UDim2.new(0, 15, 0.4, 0)
-FloatButton.Size = UDim2.new(0, 52, 0, 52)
-FloatButton.Font = Enum.Font.SourceSansBold
-FloatButton.Text = "Close"
-FloatButton.TextColor3 = Color3.fromRGB(220, 210, 240)
-FloatButton.TextSize = 14
-FloatButton.Active = true
-FloatButton.Draggable = true
-
-FloatButton.MouseButton1Click:Connect(function()
-    Config.UIHidden = not Config.UIHidden
-    MainFrame.Visible = not Config.UIHidden
-    FloatButton.Text = Config.UIHidden and "Open" or "Close"
-end)
-
--- Core Functionality Loop (Fly, Orbit, Desync, Noclip)
+-- live fps / ping update
 RunService.RenderStepped:Connect(function()
-    local character = LocalPlayer.Character
-    if not character then return end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not rootPart or not humanoid then return end
+    local fps  = math.floor(1 / RunService.RenderStepped:Wait() * 10 + 0.5) / 10
+    local ping = math.floor(Stats and Stats.Network and Stats.Network.ServerStatsItem and
+                 Stats.Network.ServerStatsItem["Data Ping"] and
+                 Stats.Network.ServerStatsItem["Data Ping"].Value or 0)
+    TopStats.Text = string.format(
+        "DiamondX | V1.0 (Beta) | Free | %d fps | %d ms", fps, ping
+    )
+end)
 
-    -- Working Mobile Fly Logic
-    if Config.Fly then
-        humanoid.PlatformStand = true
-        local moveDir = humanoid.MoveDirection
-        local velocity = moveDir * Config.FlySpeed
-        rootPart.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
-        
-        -- Keep altitude steady or adjusted via Up/Down buttons
-        rootPart.CFrame = CFrame.new(rootPart.Position.X, Config.FlyAltitude, rootPart.Position.Z) * (rootPart.CFrame - rootPart.CFrame.Position)
-    else
-        if humanoid.PlatformStand and not Config.RagebotEnable then
-            humanoid.PlatformStand = false
+local TopSub = Instance.new("TextLabel", TopBar)
+TopSub.BackgroundTransparency = 1
+TopSub.Position  = UDim2.new(0, 8, 0, 14)
+TopSub.Size      = UDim2.new(1, -16, 0, 14)
+TopSub.Font      = Enum.Font.SourceSans
+TopSub.TextColor3 = C.textDim
+TopSub.TextSize  = 11
+TopSub.TextXAlignment = Enum.TextXAlignment.Left
+TopSub.ZIndex    = 7
+TopSub.Text      = "DiamondX Hub - discord.gg/diamondx"
+
+-- close X
+local CloseX = Instance.new("TextButton", TopBar)
+CloseX.BackgroundColor3 = C.red
+CloseX.BorderSizePixel  = 0
+CloseX.Position  = UDim2.new(1, -22, 0, 4)
+CloseX.Size      = UDim2.new(0, 18, 0, 18)
+CloseX.Font      = Enum.Font.SourceSansBold
+CloseX.Text      = "X"
+CloseX.TextColor3 = Color3.new(1,1,1)
+CloseX.TextSize  = 11
+CloseX.ZIndex    = 8
+CloseX.MouseButton1Click:Connect(function()
+    Win.Visible = false
+    ToggleBtn.Text = "Open UI"
+end)
+
+-- ─────────────────────────────────────────────
+--  TAB BAR
+-- ─────────────────────────────────────────────
+local TabBar = Instance.new("Frame", Win)
+TabBar.BackgroundTransparency = 1
+TabBar.Position = UDim2.new(0, 8, 0, 34)
+TabBar.Size     = UDim2.new(1, -16, 0, 30)
+TabBar.ZIndex   = 6
+
+local tabNames = {"Main","ESP","Visual","Character","Misc","UI Settings"}
+local tabPages  = {}
+local tabBtns   = {}
+
+local TAB_W = 1 / #tabNames
+
+for i, name in ipairs(tabNames) do
+    -- button
+    local tb = Instance.new("TextButton", TabBar)
+    tb.BorderColor3      = C.border
+    tb.BorderSizePixel   = 1
+    tb.BackgroundColor3  = (i==1) and C.tabActive or C.tabInactive
+    tb.Position  = UDim2.new((i-1)*TAB_W, 1, 0, 0)
+    tb.Size      = UDim2.new(TAB_W, -2, 1, 0)
+    tb.Font      = Enum.Font.SourceSansBold
+    tb.Text      = name
+    tb.TextColor3 = C.textMain
+    tb.TextSize  = 12
+    tb.ZIndex    = 7
+    tabBtns[name] = tb
+
+    -- page (scrolling)
+    local pg = Instance.new("ScrollingFrame", Win)
+    pg.Name                = name.."Page"
+    pg.BackgroundColor3    = C.panel
+    pg.BorderColor3        = C.border
+    pg.BorderSizePixel     = 1
+    pg.Position            = UDim2.new(0, 8, 0, 68)
+    pg.Size                = UDim2.new(1, -16, 1, -76)
+    pg.CanvasSize          = UDim2.new(0, 0, 0, 500)
+    pg.ScrollBarThickness  = 4
+    pg.ScrollBarImageColor3 = C.sliderFill
+    pg.Visible             = (i==1)
+    pg.ZIndex              = 6
+    tabPages[name] = pg
+
+    tb.MouseButton1Click:Connect(function()
+        for n,p in pairs(tabPages) do p.Visible = (n==name) end
+        for n,b in pairs(tabBtns)  do
+            b.BackgroundColor3 = (n==name) and C.tabActive or C.tabInactive
         end
-    end
+    end)
+end
 
-    -- Ragebot & Orbit Logic
-    if Config.RagebotEnable then
-        if Config.Orbit then
-            local target = nil
-            local shortestDist = math.huge
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then
-                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                    local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                    if hrp and hum and hum.Health > 0 then
-                        local dist = (hrp.Position - rootPart.Position).Magnitude
-                        if dist < shortestDist then
-                            shortestDist = dist
-                            target = hrp
+-- ─────────────────────────────────────────────
+--  WIDGET HELPERS
+-- ─────────────────────────────────────────────
+
+-- Group box (labeled border box like in screenshot)
+local function GroupBox(parent, title, w, h, x, y)
+    local f = Instance.new("Frame", parent)
+    f.BackgroundColor3 = C.groupBg
+    f.BorderColor3     = C.border
+    f.BorderSizePixel  = 1
+    f.Position = UDim2.new(0, x, 0, y)
+    f.Size     = UDim2.new(0, w, 0, h)
+    f.ZIndex   = 7
+
+    local lbl = Instance.new("TextLabel", f)
+    lbl.BackgroundTransparency = 1
+    lbl.Position  = UDim2.new(0, 10, 0, 6)
+    lbl.Size      = UDim2.new(1, -14, 0, 18)
+    lbl.Font      = Enum.Font.SourceSansBold
+    lbl.Text      = title
+    lbl.TextColor3 = C.textHeader
+    lbl.TextSize  = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.ZIndex    = 8
+    return f
+end
+
+-- Checkbox toggle
+local function Checkbox(parent, label, configKey, y)
+    local box = Instance.new("TextButton", parent)
+    box.BackgroundColor3 = Config[configKey] and C.checkOn or C.checkOff
+    box.BorderColor3     = C.border
+    box.BorderSizePixel  = 1
+    box.Position = UDim2.new(0, 10, 0, y)
+    box.Size     = UDim2.new(0, 14, 0, 14)
+    box.Text     = ""
+    box.ZIndex   = 9
+
+    local lbl = Instance.new("TextLabel", parent)
+    lbl.BackgroundTransparency = 1
+    lbl.Position  = UDim2.new(0, 30, 0, y - 2)
+    lbl.Size      = UDim2.new(1, -36, 0, 18)
+    lbl.Font      = Enum.Font.SourceSans
+    lbl.Text      = label
+    lbl.TextColor3 = C.textMain
+    lbl.TextSize  = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.ZIndex    = 9
+
+    box.MouseButton1Click:Connect(function()
+        Config[configKey] = not Config[configKey]
+        box.BackgroundColor3 = Config[configKey] and C.checkOn or C.checkOff
+    end)
+    return box
+end
+
+-- Horizontal slider  (returns frame, value label)
+local function Slider(parent, label, configKey, minV, maxV, y)
+    local TRACK_W = 160
+
+    local lbl = Instance.new("TextLabel", parent)
+    lbl.BackgroundTransparency = 1
+    lbl.Position  = UDim2.new(0, 10, 0, y)
+    lbl.Size      = UDim2.new(0, TRACK_W, 0, 14)
+    lbl.Font      = Enum.Font.SourceSans
+    lbl.Text      = label .. ": " .. tostring(Config[configKey])
+    lbl.TextColor3 = C.textMain
+    lbl.TextSize  = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.ZIndex    = 9
+
+    local track = Instance.new("Frame", parent)
+    track.BackgroundColor3 = C.sliderBg
+    track.BorderColor3     = C.border
+    track.BorderSizePixel  = 1
+    track.Position = UDim2.new(0, 10, 0, y + 16)
+    track.Size     = UDim2.new(0, TRACK_W, 0, 14)
+    track.ZIndex   = 9
+
+    local fill = Instance.new("Frame", track)
+    fill.BackgroundColor3 = C.sliderFill
+    fill.BorderSizePixel  = 0
+    fill.Size  = UDim2.new((Config[configKey] - minV)/(maxV - minV), 0, 1, 0)
+    fill.ZIndex = 10
+
+    -- drag logic
+    local sliding = false
+    track.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+        end
+    end)
+    track.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if not sliding then return end
+        if i.UserInputType ~= Enum.UserInputType.MouseMovement
+        and i.UserInputType ~= Enum.UserInputType.Touch then return end
+        local absPos = track.AbsolutePosition.X
+        local absSize = track.AbsoluteSize.X
+        local rel = math.clamp((i.Position.X - absPos) / absSize, 0, 1)
+        local val = math.floor(rel * (maxV - minV) + minV + 0.5)
+        Config[configKey] = val
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        lbl.Text  = label .. ": " .. tostring(val)
+    end)
+end
+
+-- ─────────────────────────────────────────────
+--  POPULATE: MAIN TAB
+--  Layout mirrors screenshot: Ragebot (left) | Wallbang (right)
+-- ─────────────────────────────────────────────
+local mainPage = tabPages["Main"]
+
+-- Ragebot group — matches screenshot exactly
+local rageGroup = GroupBox(mainPage, "Ragebot", 490, 210, 8, 8)
+Checkbox(rageGroup, "Enable",       "RagebotEnabled", 30)
+Checkbox(rageGroup, "Orbit",        "Orbit",           54)
+Checkbox(rageGroup, "Desync (Beta)","Desync",          78)
+Slider(rageGroup,   "Attack", "AttackTick", 1, 10, 106)
+Slider(rageGroup,   "Hide",   "HideTick",   1, 10, 150)
+
+-- Wallbang group — right column, same row
+local wallGroup = GroupBox(mainPage, "Wallbang", 500, 80, 8, 230)
+Checkbox(wallGroup, "Enable", "Wallbang", 30)
+
+-- ─────────────────────────────────────────────
+--  POPULATE: ESP TAB
+-- ─────────────────────────────────────────────
+local espPage = tabPages["ESP"]
+local espGroup = GroupBox(espPage, "ESP Options", 490, 165, 8, 8)
+Checkbox(espGroup, "Enable ESP",    "ESPEnabled", 30)
+Checkbox(espGroup, "Boxes",         "ESPBoxes",   54)
+Checkbox(espGroup, "Names",         "ESPNames",   78)
+Checkbox(espGroup, "Health Bars",   "ESPHealth",  102)
+Checkbox(espGroup, "Tracers",       "ESPTracers", 126)
+
+-- ─────────────────────────────────────────────
+--  POPULATE: VISUAL TAB
+-- ─────────────────────────────────────────────
+local visPage = tabPages["Visual"]
+local visGroup = GroupBox(visPage, "Visuals", 490, 115, 8, 8)
+Checkbox(visGroup, "No Recoil",  "NoRecoil",  30)
+Checkbox(visGroup, "No Spread",  "NoSpread",  54)
+Checkbox(visGroup, "Full Bright","FullBright", 78)
+
+-- ─────────────────────────────────────────────
+--  POPULATE: CHARACTER TAB
+-- ─────────────────────────────────────────────
+local charPage = tabPages["Character"]
+local movGroup = GroupBox(charPage, "Movement", 490, 200, 8, 8)
+Checkbox(movGroup, "Fly",            "Fly",          30)
+Slider(movGroup,   "Fly Speed", "FlySpeed", 10, 200,   50)
+Checkbox(movGroup, "Infinite Jump",  "InfiniteJump", 98)
+Checkbox(movGroup, "Noclip",         "Noclip",       122)
+Checkbox(movGroup, "Speed Hack",     "SpeedHack",    146)
+Slider(movGroup,   "Walk Speed", "WalkSpeed", 16, 200, 166)
+
+-- ─────────────────────────────────────────────
+--  POPULATE: MISC TAB
+-- ─────────────────────────────────────────────
+local miscPage = tabPages["Misc"]
+local miscGroup = GroupBox(miscPage, "Utility", 490, 115, 8, 8)
+Checkbox(miscGroup, "Rapid Fire",  "RapidFire",  30)
+Checkbox(miscGroup, "Fast Attack", "FastAttack", 54)
+Checkbox(miscGroup, "Auto Parry",  "AutoParry",  78)
+
+-- ─────────────────────────────────────────────
+--  POPULATE: UI SETTINGS TAB
+-- ─────────────────────────────────────────────
+local uiPage = tabPages["UI Settings"]
+local uiGroup = GroupBox(uiPage, "Interface", 490, 80, 8, 8)
+Checkbox(uiGroup, "Lock UI Position", "UILocked", 30)
+Checkbox(uiGroup, "Hide on Spawn",    "UIHidden",  54)
+
+-- ─────────────────────────────────────────────
+--  SIDEBAR LOGIC
+-- ─────────────────────────────────────────────
+ToggleBtn.MouseButton1Click:Connect(function()
+    Config.UIHidden = not Config.UIHidden
+    Win.Visible     = not Config.UIHidden
+    ToggleBtn.Text  = Config.UIHidden and "Open UI" or "Toggle UI"
+end)
+
+UnlockBtn.MouseButton1Click:Connect(function()
+    Config.UILocked = not Config.UILocked
+    UnlockBtn.Text  = Config.UILocked and "Lock UI" or "Unlock UI"
+end)
+
+-- ─────────────────────────────────────────────
+--  CORE LOGIC
+-- ─────────────────────────────────────────────
+
+-- Desync: hold offset for ~100ms across heartbeats (not single-frame no-op)
+local desyncOffset = Vector3.new(0,0,0)
+local desyncClock  = 0
+RunService.Heartbeat:Connect(function(dt)
+    local char     = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    if Config.Desync then
+        desyncClock = desyncClock + dt
+        if desyncClock >= 0.1 then
+            desyncOffset = Vector3.new(
+                math.random(-14,14),
+                math.random(-4, 4),
+                math.random(-14,14)
+            )
+            desyncClock = 0
+        end
+        pcall(function() root.CFrame = root.CFrame + desyncOffset end)
+    end
+end)
+
+-- RenderStepped: weapon patches + fly + ragebot hooks
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root     = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+
+    -- weapon value patching (cached scan each frame only when flags on)
+    if Config.RapidFire or Config.FastAttack or Config.NoRecoil or Config.NoSpread then
+        pcall(function()
+            for _, tool in ipairs(char:GetChildren()) do
+                if tool:IsA("Tool") then
+                    for _, v in ipairs(tool:GetDescendants()) do
+                        if v:IsA("NumberValue") or v:IsA("IntValue") then
+                            local n = v.Name:lower()
+                            if Config.RapidFire  and (n:find("cooldown") or n:find("firerate") or n:find("rate")) then v.Value = 0.01 end
+                            if Config.NoRecoil   and (n:find("recoil")   or n:find("kick"))    then v.Value = 0    end
+                            if Config.NoSpread   and (n:find("spread")   or n:find("accuracy") or n:find("inaccuracy")) then v.Value = 0 end
                         end
                     end
                 end
             end
+        end)
+    end
 
-            if target then
-                local offset = Vector3.new(Config.OrbitOffsetX, Config.OrbitOffsetY, Config.OrbitOffsetZ)
-                rootPart.CFrame = CFrame.new(target.Position + offset, target.Position)
-                rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    -- fly
+    if Config.Fly and humanoid and root then
+        humanoid.PlatformStand = true
+        local md = humanoid.MoveDirection
+        root.AssemblyLinearVelocity = Vector3.new(
+            md.X * Config.FlySpeed,
+            0,
+            md.Z * Config.FlySpeed
+        )
+    elseif humanoid and not Config.Fly and humanoid.PlatformStand then
+        humanoid.PlatformStand = false
+    end
+
+    -- speed hack
+    if Config.SpeedHack and humanoid then
+        humanoid.WalkSpeed = Config.WalkSpeed
+    end
+
+    -- noclip
+    if Config.Noclip and char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
             end
-        end
-
-        -- Desync Jitter Logic
-        if Config.Desync then
-            pcall(function()
-                local originalVelocity = rootPart.AssemblyLinearVelocity
-                rootPart.AssemblyLinearVelocity = Vector3.new(math.random(-50, 50), math.random(10, 30), math.random(-50, 50))
-                RunService.RenderStepped:Wait()
-                rootPart.AssemblyLinearVelocity = originalVelocity
-            end)
         end
     end
 
-    -- Noclip
-    if Config.Noclip then
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
+    -- fullbright
+    if Config.FullBright then
+        pcall(function()
+            game:GetService("Lighting").Brightness    = 2
+            game:GetService("Lighting").ClockTime     = 14
+            game:GetService("Lighting").FogEnd        = 100000
+            game:GetService("Lighting").GlobalShadows = false
+            game:GetService("Lighting").Ambient       = Color3.new(1,1,1)
+        end)
     end
 end)
 
@@ -327,12 +567,47 @@ UserInputService.JumpRequest:Connect(function()
     if Config.InfiniteJump then
         local char = LocalPlayer.Character
         if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            local h = char:FindFirstChildOfClass("Humanoid")
+            if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end
+end)
+
+-- ESP loop (basic box + name overhead)
+RunService.RenderStepped:Connect(function()
+    -- clean old tags
+    for _, v in ipairs(CoreGui:GetChildren()) do
+        if v.Name == "DX_ESP" then v:Destroy() end
+    end
+    if not Config.ESPEnabled then return end
+
+    local cam = workspace.CurrentCamera
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local root = plr.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                local pos, onScreen = cam:WorldToViewportPoint(root.Position)
+                if onScreen then
+                    local tag = Instance.new("BillboardGui", CoreGui)
+                    tag.Name        = "DX_ESP"
+                    tag.Adornee     = root
+                    tag.Size        = UDim2.new(0, 80, 0, 20)
+                    tag.StudsOffset = Vector3.new(0, 3.5, 0)
+                    tag.AlwaysOnTop = true
+                    if Config.ESPNames then
+                        local nl = Instance.new("TextLabel", tag)
+                        nl.BackgroundTransparency = 1
+                        nl.Size      = UDim2.new(1,0,1,0)
+                        nl.Text      = plr.Name
+                        nl.TextColor3 = Color3.fromRGB(255,80,80)
+                        nl.TextSize  = 14
+                        nl.Font      = Enum.Font.SourceSansBold
+                    end
+                end
             end
         end
     end
 end)
 
-print("[DiamondX v1] Mobile script loaded successfully with fully working Fly, Desync, and UI Toggle!")
+-- ─────────────────────────────────────────────
+print("[DiamondX] Loaded — tabs: Main ESP Visual Character Misc UI Settings")
