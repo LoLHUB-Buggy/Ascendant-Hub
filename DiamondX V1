@@ -1,0 +1,269 @@
+-- DiamondX v1: Mobile Optimized Script
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Stats = game:GetService("Stats")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Configuration
+local Config = {
+    UIHidden = false,
+    UILocked = false,
+    RagebotEnable = false,
+    Orbit = false,
+    OrbitOffsetX = 0,
+    OrbitOffsetY = 2,
+    OrbitOffsetZ = 0,
+    Noclip = false,
+    InfiniteJump = false
+}
+
+-- Cleanup old GUI if it exists
+if CoreGui:FindFirstChild("DiamondXHubMobile") then
+    CoreGui.DiamondXHubMobile:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DiamondXHubMobile"
+ScreenGui.Parent = CoreGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Main Mobile Window
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 12, 22)
+MainFrame.BorderColor3 = Color3.fromRGB(65, 45, 95)
+MainFrame.BorderSizePixel = 1
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -190)
+MainFrame.Size = UDim2.new(0, 340, 0, 380)
+MainFrame.Active = true
+
+-- Mobile-Friendly Draggable Support (Mouse & Touch)
+local dragging, dragInput, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if Config.UILocked then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if Config.UILocked then return end
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Top Bar (DiamondX v1 branding + Live stats)
+local TopBar = Instance.new("Frame", MainFrame)
+TopBar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
+TopBar.BorderColor3 = Color3.fromRGB(65, 45, 95)
+TopBar.Position = UDim2.new(0, 8, 0, 8)
+TopBar.Size = UDim2.new(1, -16, 0, 24)
+
+local TopBarText = Instance.new("TextLabel", TopBar)
+TopBarText.BackgroundTransparency = 1
+TopBarText.Size = UDim2.new(1, 0, 1, 0)
+TopBarText.Font = Enum.Font.Code
+TopBarText.Text = "DiamondX v1 | Free"
+TopBarText.TextColor3 = Color3.fromRGB(200, 190, 220)
+TopBarText.TextSize = 11
+
+-- Dynamic FPS & Ping Tracker
+task.spawn(function()
+    while true do
+        pcall(function()
+            local fps = math.floor(1 / RunService.RenderStepped:Wait())
+            local pingVal = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+            TopBarText.Text = string.format("DiamondX v1 | Free | %d fps | %d ms", fps, math.floor(pingVal))
+        end)
+        task.wait(0.6)
+    end
+end)
+
+-- Scrolling Container for Mobile Options
+local ScrollContainer = Instance.new("ScrollingFrame", MainFrame)
+ScrollContainer.BackgroundTransparency = 1
+ScrollContainer.Position = UDim2.new(0, 8, 0, 40)
+ScrollContainer.Size = UDim2.new(1, -16, 1, -48)
+ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, 400)
+ScrollContainer.ScrollBarThickness = 4
+
+-- Helper to make mobile buttons / toggles
+local function createMobileToggle(name, configKey, yPos)
+    local btn = Instance.new("TextButton", ScrollContainer)
+    btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
+    btn.BorderColor3 = Color3.fromRGB(65, 45, 95)
+    btn.Position = UDim2.new(0, 5, 0, yPos)
+    btn.Size = UDim2.new(0, 16, 0, 16)
+    btn.Text = ""
+
+    local lbl = Instance.new("TextLabel", ScrollContainer)
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 28, 0, yPos - 2)
+    lbl.Size = UDim2.new(0, 250, 0, 20)
+    lbl.Font = Enum.Font.SourceSansBold
+    lbl.Text = name
+    lbl.TextColor3 = Color3.fromRGB(210, 200, 230)
+    lbl.TextSize = 14
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    btn.MouseButton1Click:Connect(function()
+        Config[configKey] = not Config[configKey]
+        btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
+        if configKey == "UIHidden" then
+            MainFrame.Visible = not Config.UIHidden
+        end
+    end)
+end
+
+-- Helper for mobile sliders (Orbit Adjustments)
+local function createMobileSlider(name, configKey, min, max, yPos)
+    local lbl = Instance.new("TextLabel", ScrollContainer)
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 5, 0, yPos)
+    lbl.Size = UDim2.new(1, -10, 0, 16)
+    lbl.Font = Enum.Font.SourceSans
+    lbl.Text = name .. ": " .. tostring(Config[configKey])
+    lbl.TextColor3 = Color3.fromRGB(200, 190, 220)
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local bar = Instance.new("Frame", ScrollContainer)
+    bar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
+    bar.BorderColor3 = Color3.fromRGB(65, 45, 95)
+    bar.Position = UDim2.new(0, 5, 0, yPos + 18)
+    bar.Size = UDim2.new(1, -20, 0, 16)
+
+    local fill = Instance.new("Frame", bar)
+    fill.BackgroundColor3 = Color3.fromRGB(85, 65, 140)
+    fill.BorderSizePixel = 0
+    local initialPos = math.clamp((Config[configKey] - min) / (max - min), 0, 1)
+    fill.Size = UDim2.new(initialPos, 0, 1, 0)
+
+    local draggingSlider = false
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local absoluteSizeX = bar.AbsoluteSize.X
+            if absoluteSizeX > 0 then
+                local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / absoluteSizeX, 0, 1)
+                Config[configKey] = math.floor(min + (max - min) * pos)
+                fill.Size = UDim2.new(pos, 0, 1, 0)
+                lbl.Text = name .. ": " .. tostring(Config[configKey])
+            end
+        end
+    end)
+end
+
+-- Build Controls on Mobile Menu
+createMobileToggle("Enable Ragebot Orbit", "RagebotEnable", 10)
+createMobileToggle("Active Orbit Lock", "Orbit", 38)
+createMobileToggle("Lock UI Position", "UILocked", 66)
+createMobileToggle("Noclip", "Noclip", 94)
+createMobileToggle("Infinite Jump", "InfiniteJump", 122)
+
+createMobileSlider("Orbit Offset X", "OrbitOffsetX", -15, 15, 160)
+createMobileSlider("Orbit Offset Y", "OrbitOffsetY", -15, 15, 215)
+createMobileSlider("Orbit Offset Z", "OrbitOffsetZ", -15, 15, 270)
+
+-- Floating Mobile Toggle Button
+local FloatButton = Instance.new("TextButton", ScreenGui)
+FloatButton.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
+FloatButton.BorderColor3 = Color3.fromRGB(65, 45, 95)
+FloatButton.Position = UDim2.new(0, 15, 0.4, 0)
+FloatButton.Size = UDim2.new(0, 45, 0, 45)
+FloatButton.Font = Enum.Font.SourceSansBold
+FloatButton.Text = "UI"
+FloatButton.TextColor3 = Color3.fromRGB(220, 210, 240)
+FloatButton.TextSize = 16
+FloatButton.Active = true
+FloatButton.Draggable = true
+
+FloatButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+-- Core Functionality Loop (Mobile Optimized)
+RunService.RenderStepped:Connect(function()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    -- Orbit Position Adjustment Logic
+    if Config.RagebotEnable and Config.Orbit then
+        local target = nil
+        local shortestDist = math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local dist = (hrp.Position - rootPart.Position).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        target = hrp
+                    end
+                end
+            end
+        end
+
+        if target then
+            local offset = Vector3.new(Config.OrbitOffsetX, Config.OrbitOffsetY, Config.OrbitOffsetZ)
+            rootPart.CFrame = CFrame.new(target.Position + offset, target.Position)
+            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+    end
+
+    -- Noclip
+    if Config.Noclip then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- Infinite Jump
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfiniteJump then
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end)
+
+print("[DiamondX v1] Mobile script successfully executed!")
