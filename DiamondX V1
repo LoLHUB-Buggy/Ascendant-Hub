@@ -1,269 +1,833 @@
--- DiamondX v1: Mobile Optimized Script
-local CoreGui = game:GetService("CoreGui")
+-- DiamondX Hub | V2.0 | Mobile-first | Screenshot-matched Misc tab
+-- Tabs: Main, ESP, Visual, Character, Misc, UI Settings
+-- Misc tab: weapon dropdowns + Gun Mode | Movement + Auto Vote + Queue
+
+local CoreGui          = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local Stats = game:GetService("Stats")
+local RunService       = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local Stats            = game:GetService("Stats")
+local LocalPlayer      = Players.LocalPlayer
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+-- ─────────────────────────────────────────────
+--  SCREEN METRICS
+-- ─────────────────────────────────────────────
+local VP        = workspace.CurrentCamera.ViewportSize
+local IS_MOBILE = UserInputService.TouchEnabled
+local WIN_W     = math.min(VP.X - 10, IS_MOBILE and 430 or 720)
+local WIN_H     = IS_MOBILE and 370 or 440
+local TAP_H     = IS_MOBILE and 36  or 24
+local CHECK_SZ  = IS_MOBILE and 22  or 14
+local FSZ_LG    = IS_MOBILE and 15  or 13
+local FSZ_SM    = IS_MOBILE and 13  or 11
+local FSZ_TAB   = IS_MOBILE and 13  or 12
+local COL_W     = math.floor((WIN_W - 28) / 2)   -- two-column layout width
+local GBW_FULL  = WIN_W - 24                       -- full-width group box
 
--- Configuration
+-- ─────────────────────────────────────────────
+--  CONFIG
+-- ─────────────────────────────────────────────
 local Config = {
-    UIHidden = false,
+    -- Main / Ragebot
+    RagebotEnabled = false,
+    Orbit          = false,
+    Desync         = false,
+    AttackTick     = 1,
+    HideTick       = 1,
+    Wallbang       = false,
+    -- ESP
+    ESPEnabled     = false,
+    ESPBoxes       = false,
+    ESPNames       = false,
+    ESPHealth      = false,
+    ESPTracers     = false,
+    -- Visual
+    NoRecoil       = false,
+    NoSpread       = false,
+    FullBright     = false,
+    -- Character / Movement
+    Fly            = false,
+    FlySpeed       = 50,
+    Noclip         = false,
+    InfiniteJump   = false,
+    SpeedHack      = false,
+    WalkSpeed      = 16,
+    -- Gun Mode (Misc)
+    AutoShoot      = false,
+    RapidFire      = false,
+    RapidMelee     = false,
+    -- Auto Vote (Misc)
+    AutoVote       = false,
+    -- Weapon selections (Misc dropdowns)
+    SecondaryWeapon = "Revolver",
+    FistWeapon      = "Fists",
+    GrenadeWeapon   = "Grenade",
+    VoteMap         = "Chess",
+    -- UI
     UILocked = false,
-    RagebotEnable = false,
-    Orbit = false,
-    OrbitOffsetX = 0,
-    OrbitOffsetY = 2,
-    OrbitOffsetZ = 0,
-    Noclip = false,
-    InfiniteJump = false
+    UIHidden = false,
 }
 
--- Cleanup old GUI if it exists
-if CoreGui:FindFirstChild("DiamondXHubMobile") then
-    CoreGui.DiamondXHubMobile:Destroy()
+-- ─────────────────────────────────────────────
+--  CLEANUP
+-- ─────────────────────────────────────────────
+if CoreGui:FindFirstChild("DiamondXV2") then
+    CoreGui.DiamondXV2:Destroy()
 end
 
+-- ─────────────────────────────────────────────
+--  ROOT GUI
+-- ─────────────────────────────────────────────
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DiamondXHubMobile"
-ScreenGui.Parent = CoreGui
+ScreenGui.Name           = "DiamondXV2"
+ScreenGui.Parent         = CoreGui
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.IgnoreGuiInset = true
 
--- Main Mobile Window
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 12, 22)
-MainFrame.BorderColor3 = Color3.fromRGB(65, 45, 95)
-MainFrame.BorderSizePixel = 1
-MainFrame.Position = UDim2.new(0.5, -170, 0.5, -190)
-MainFrame.Size = UDim2.new(0, 340, 0, 380)
-MainFrame.Active = true
+-- ─────────────────────────────────────────────
+--  COLOURS
+-- ─────────────────────────────────────────────
+local C = {
+    bg          = Color3.fromRGB(13,  15,  30),
+    panel       = Color3.fromRGB(18,  20,  40),
+    border      = Color3.fromRGB(80,  60, 160),
+    tabActive   = Color3.fromRGB(22,  24,  48),
+    tabInactive = Color3.fromRGB(13,  15,  30),
+    groupBg     = Color3.fromRGB(16,  18,  36),
+    sliderFill  = Color3.fromRGB(90,  60, 180),
+    sliderBg    = Color3.fromRGB(28,  22,  55),
+    checkOn     = Color3.fromRGB(90,  60, 180),
+    checkOff    = Color3.fromRGB(28,  22,  55),
+    dropBg      = Color3.fromRGB(20,  18,  42),
+    dropHover   = Color3.fromRGB(40,  32,  80),
+    textMain    = Color3.fromRGB(220, 215, 240),
+    textDim     = Color3.fromRGB(150, 140, 175),
+    textHeader  = Color3.fromRGB(255, 255, 255),
+    sidebarBg   = Color3.fromRGB(10,  12,  26),
+    topbar      = Color3.fromRGB(10,  12,  26),
+    red         = Color3.fromRGB(180,  40,  40),
+}
 
--- Mobile-Friendly Draggable Support (Mouse & Touch)
-local dragging, dragInput, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if Config.UILocked then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
+-- ─────────────────────────────────────────────
+--  SIDEBAR
+-- ─────────────────────────────────────────────
+local Sidebar = Instance.new("Frame", ScreenGui)
+Sidebar.BackgroundColor3 = C.sidebarBg
+Sidebar.BorderColor3     = C.border
+Sidebar.BorderSizePixel  = 1
+Sidebar.Position         = UDim2.new(0, 0, 0.28, 0)
+Sidebar.Size             = UDim2.new(0, IS_MOBILE and 82 or 90, 0, TAP_H*2 + 2)
+Sidebar.ZIndex           = 20
+Sidebar.Active           = true
+
+-- sidebar drag
+local sDrag, sDragStart, sSideStart
+Sidebar.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
+        sDrag=true; sDragStart=i.Position; sSideStart=Sidebar.Position
+        i.Changed:Connect(function()
+            if i.UserInputState == Enum.UserInputState.End then sDrag=false end
         end)
     end
 end)
-
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
+UserInputService.InputChanged:Connect(function(i)
+    if not sDrag then return end
+    if i.UserInputType ~= Enum.UserInputType.MouseMovement
+    and i.UserInputType ~= Enum.UserInputType.Touch then return end
+    local d = i.Position - sDragStart
+    Sidebar.Position = UDim2.new(
+        sSideStart.X.Scale, sSideStart.X.Offset + d.X,
+        sSideStart.Y.Scale, sSideStart.Y.Offset + d.Y)
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then sDrag=false end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
+local function makeSideBtn(text, yOff)
+    local b = Instance.new("TextButton", Sidebar)
+    b.BackgroundColor3 = C.sidebarBg
+    b.BorderColor3     = C.border
+    b.BorderSizePixel  = 1
+    b.Position         = UDim2.new(0,0,0,yOff)
+    b.Size             = UDim2.new(1,0,0,TAP_H)
+    b.Font             = Enum.Font.SourceSansBold
+    b.Text             = text
+    b.TextColor3       = C.textMain
+    b.TextSize         = FSZ_SM
+    b.ZIndex           = 21
+    return b
+end
+local ToggleBtn = makeSideBtn("Toggle UI", 0)
+local UnlockBtn = makeSideBtn("Unlock UI", TAP_H+2)
+
+-- ─────────────────────────────────────────────
+--  MAIN WINDOW
+-- ─────────────────────────────────────────────
+local TOPBAR_H = IS_MOBILE and 42 or 32
+local TAB_H2   = IS_MOBILE and 34 or 28
+local CONTENT_Y= TOPBAR_H + TAB_H2 + 4
+local CONTENT_H= WIN_H - CONTENT_Y - 4
+
+local Win = Instance.new("Frame", ScreenGui)
+Win.Name             = "MainWindow"
+Win.BackgroundColor3 = C.bg
+Win.BorderColor3     = C.border
+Win.BorderSizePixel  = 2
+Win.Position         = UDim2.new(0.5,-WIN_W/2, 0.5,-WIN_H/2)
+Win.Size             = UDim2.new(0,WIN_W,0,WIN_H)
+Win.Active           = true
+Win.ZIndex           = 5
+
+-- window drag
+local wDrag,wDragStart,wWinStart,wLastInput
+Win.InputBegan:Connect(function(i)
     if Config.UILocked then return end
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    if i.UserInputType==Enum.UserInputType.MouseButton1
+    or i.UserInputType==Enum.UserInputType.Touch then
+        wDrag=true; wDragStart=i.Position; wWinStart=Win.Position
+        i.Changed:Connect(function()
+            if i.UserInputState==Enum.UserInputState.End then wDrag=false end
+        end)
     end
 end)
+Win.InputChanged:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseMovement
+    or i.UserInputType==Enum.UserInputType.Touch then wLastInput=i end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if Config.UILocked or not wDrag or i~=wLastInput then return end
+    local d=i.Position-wDragStart
+    Win.Position=UDim2.new(wWinStart.X.Scale,wWinStart.X.Offset+d.X,
+                            wWinStart.Y.Scale,wWinStart.Y.Offset+d.Y)
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1
+    or i.UserInputType==Enum.UserInputType.Touch then wDrag=false end
+end)
 
--- Top Bar (DiamondX v1 branding + Live stats)
-local TopBar = Instance.new("Frame", MainFrame)
-TopBar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
-TopBar.BorderColor3 = Color3.fromRGB(65, 45, 95)
-TopBar.Position = UDim2.new(0, 8, 0, 8)
-TopBar.Size = UDim2.new(1, -16, 0, 24)
+-- ─────────────────────────────────────────────
+--  TOP BAR
+-- ─────────────────────────────────────────────
+local TopBar = Instance.new("Frame", Win)
+TopBar.BackgroundColor3 = C.topbar
+TopBar.BorderColor3     = C.border
+TopBar.BorderSizePixel  = 1
+TopBar.Size             = UDim2.new(1,0,0,TOPBAR_H)
+TopBar.ZIndex           = 6
 
-local TopBarText = Instance.new("TextLabel", TopBar)
-TopBarText.BackgroundTransparency = 1
-TopBarText.Size = UDim2.new(1, 0, 1, 0)
-TopBarText.Font = Enum.Font.Code
-TopBarText.Text = "DiamondX v1 | Free"
-TopBarText.TextColor3 = Color3.fromRGB(200, 190, 220)
-TopBarText.TextSize = 11
+local TopStats = Instance.new("TextLabel", TopBar)
+TopStats.BackgroundTransparency = 1
+TopStats.Position       = UDim2.new(0,8,0,2)
+TopStats.Size           = UDim2.new(1,-40,0,TOPBAR_H/2)
+TopStats.Font           = Enum.Font.SourceSansBold
+TopStats.TextColor3     = C.textMain
+TopStats.TextSize       = FSZ_SM
+TopStats.TextXAlignment = Enum.TextXAlignment.Left
+TopStats.ZIndex         = 7
+TopStats.Text           = "DiamondX | V2.0 | Free | -- fps | -- ms"
 
--- Dynamic FPS & Ping Tracker
-task.spawn(function()
-    while true do
+local TopSub = Instance.new("TextLabel", TopBar)
+TopSub.BackgroundTransparency = 1
+TopSub.Position       = UDim2.new(0,8,0,TOPBAR_H/2)
+TopSub.Size           = UDim2.new(1,-40,0,TOPBAR_H/2)
+TopSub.Font           = Enum.Font.SourceSans
+TopSub.TextColor3     = C.textDim
+TopSub.TextSize       = FSZ_SM - 1
+TopSub.TextXAlignment = Enum.TextXAlignment.Left
+TopSub.ZIndex         = 7
+TopSub.Text           = "DiamondX Hub - discord.gg/diamondx"
+
+-- fps accumulator (no nested :Wait())
+local fpsBuffer,fpsClock,fpsVal,pingVal={},0,0,0
+RunService.Heartbeat:Connect(function(dt)
+    fpsClock=fpsClock+dt
+    table.insert(fpsBuffer,dt)
+    if fpsClock>=0.5 then
+        local tot=0
+        for _,v in ipairs(fpsBuffer) do tot=tot+v end
+        fpsVal=math.floor(#fpsBuffer/tot+0.5)
+        fpsBuffer={}; fpsClock=0
         pcall(function()
-            local fps = math.floor(1 / RunService.RenderStepped:Wait())
-            local pingVal = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-            TopBarText.Text = string.format("DiamondX v1 | Free | %d fps | %d ms", fps, math.floor(pingVal))
+            pingVal=math.floor(Stats.Network.ServerStatsItem["Data Ping"].Value)
         end)
-        task.wait(0.6)
+        TopStats.Text=string.format("DiamondX | V2.0 | Free | %d fps | %d ms",fpsVal,pingVal)
     end
 end)
 
--- Scrolling Container for Mobile Options
-local ScrollContainer = Instance.new("ScrollingFrame", MainFrame)
-ScrollContainer.BackgroundTransparency = 1
-ScrollContainer.Position = UDim2.new(0, 8, 0, 40)
-ScrollContainer.Size = UDim2.new(1, -16, 1, -48)
-ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, 400)
-ScrollContainer.ScrollBarThickness = 4
-
--- Helper to make mobile buttons / toggles
-local function createMobileToggle(name, configKey, yPos)
-    local btn = Instance.new("TextButton", ScrollContainer)
-    btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
-    btn.BorderColor3 = Color3.fromRGB(65, 45, 95)
-    btn.Position = UDim2.new(0, 5, 0, yPos)
-    btn.Size = UDim2.new(0, 16, 0, 16)
-    btn.Text = ""
-
-    local lbl = Instance.new("TextLabel", ScrollContainer)
-    lbl.BackgroundTransparency = 1
-    lbl.Position = UDim2.new(0, 28, 0, yPos - 2)
-    lbl.Size = UDim2.new(0, 250, 0, 20)
-    lbl.Font = Enum.Font.SourceSansBold
-    lbl.Text = name
-    lbl.TextColor3 = Color3.fromRGB(210, 200, 230)
-    lbl.TextSize = 14
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    btn.MouseButton1Click:Connect(function()
-        Config[configKey] = not Config[configKey]
-        btn.BackgroundColor3 = Config[configKey] and Color3.fromRGB(85, 65, 140) or Color3.fromRGB(22, 18, 32)
-        if configKey == "UIHidden" then
-            MainFrame.Visible = not Config.UIHidden
-        end
-    end)
-end
-
--- Helper for mobile sliders (Orbit Adjustments)
-local function createMobileSlider(name, configKey, min, max, yPos)
-    local lbl = Instance.new("TextLabel", ScrollContainer)
-    lbl.BackgroundTransparency = 1
-    lbl.Position = UDim2.new(0, 5, 0, yPos)
-    lbl.Size = UDim2.new(1, -10, 0, 16)
-    lbl.Font = Enum.Font.SourceSans
-    lbl.Text = name .. ": " .. tostring(Config[configKey])
-    lbl.TextColor3 = Color3.fromRGB(200, 190, 220)
-    lbl.TextSize = 13
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local bar = Instance.new("Frame", ScrollContainer)
-    bar.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
-    bar.BorderColor3 = Color3.fromRGB(65, 45, 95)
-    bar.Position = UDim2.new(0, 5, 0, yPos + 18)
-    bar.Size = UDim2.new(1, -20, 0, 16)
-
-    local fill = Instance.new("Frame", bar)
-    fill.BackgroundColor3 = Color3.fromRGB(85, 65, 140)
-    fill.BorderSizePixel = 0
-    local initialPos = math.clamp((Config[configKey] - min) / (max - min), 0, 1)
-    fill.Size = UDim2.new(initialPos, 0, 1, 0)
-
-    local draggingSlider = false
-    bar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingSlider = true
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingSlider = false
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local absoluteSizeX = bar.AbsoluteSize.X
-            if absoluteSizeX > 0 then
-                local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / absoluteSizeX, 0, 1)
-                Config[configKey] = math.floor(min + (max - min) * pos)
-                fill.Size = UDim2.new(pos, 0, 1, 0)
-                lbl.Text = name .. ": " .. tostring(Config[configKey])
-            end
-        end
-    end)
-end
-
--- Build Controls on Mobile Menu
-createMobileToggle("Enable Ragebot Orbit", "RagebotEnable", 10)
-createMobileToggle("Active Orbit Lock", "Orbit", 38)
-createMobileToggle("Lock UI Position", "UILocked", 66)
-createMobileToggle("Noclip", "Noclip", 94)
-createMobileToggle("Infinite Jump", "InfiniteJump", 122)
-
-createMobileSlider("Orbit Offset X", "OrbitOffsetX", -15, 15, 160)
-createMobileSlider("Orbit Offset Y", "OrbitOffsetY", -15, 15, 215)
-createMobileSlider("Orbit Offset Z", "OrbitOffsetZ", -15, 15, 270)
-
--- Floating Mobile Toggle Button
-local FloatButton = Instance.new("TextButton", ScreenGui)
-FloatButton.BackgroundColor3 = Color3.fromRGB(22, 18, 32)
-FloatButton.BorderColor3 = Color3.fromRGB(65, 45, 95)
-FloatButton.Position = UDim2.new(0, 15, 0.4, 0)
-FloatButton.Size = UDim2.new(0, 45, 0, 45)
-FloatButton.Font = Enum.Font.SourceSansBold
-FloatButton.Text = "UI"
-FloatButton.TextColor3 = Color3.fromRGB(220, 210, 240)
-FloatButton.TextSize = 16
-FloatButton.Active = true
-FloatButton.Draggable = true
-
-FloatButton.MouseButton1Click:Connect(function()
-    MainFrame.Visible = not MainFrame.Visible
+local CLOSE_SZ=IS_MOBILE and 28 or 18
+local CloseX=Instance.new("TextButton",TopBar)
+CloseX.BackgroundColor3=C.red; CloseX.BorderSizePixel=0
+CloseX.Position=UDim2.new(1,-(CLOSE_SZ+4),0,(TOPBAR_H-CLOSE_SZ)/2)
+CloseX.Size=UDim2.new(0,CLOSE_SZ,0,CLOSE_SZ)
+CloseX.Font=Enum.Font.SourceSansBold; CloseX.Text="X"
+CloseX.TextColor3=Color3.new(1,1,1); CloseX.TextSize=IS_MOBILE and 14 or 11
+CloseX.ZIndex=8
+CloseX.MouseButton1Click:Connect(function()
+    Win.Visible=false; ToggleBtn.Text="Open UI"
 end)
 
--- Core Functionality Loop (Mobile Optimized)
-RunService.RenderStepped:Connect(function()
-    local character = LocalPlayer.Character
-    if not character then return end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
+-- ─────────────────────────────────────────────
+--  TAB BAR
+-- ─────────────────────────────────────────────
+local TabBar=Instance.new("Frame",Win)
+TabBar.BackgroundTransparency=1
+TabBar.Position=UDim2.new(0,4,0,TOPBAR_H+2)
+TabBar.Size=UDim2.new(1,-8,0,TAB_H2)
+TabBar.ZIndex=6
 
-    -- Orbit Position Adjustment Logic
-    if Config.RagebotEnable and Config.Orbit then
-        local target = nil
-        local shortestDist = math.huge
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
-                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                if hrp and hum and hum.Health > 0 then
-                    local dist = (hrp.Position - rootPart.Position).Magnitude
-                    if dist < shortestDist then
-                        shortestDist = dist
-                        target = hrp
+local tabNames={"Main","ESP","Visual","Character","Misc","UI Settings"}
+local tabPages,tabBtns={},{}
+local TAB_W=1/#tabNames
+
+for i,name in ipairs(tabNames) do
+    local tb=Instance.new("TextButton",TabBar)
+    tb.BackgroundColor3=(i==1) and C.tabActive or C.tabInactive
+    tb.BorderColor3=C.border; tb.BorderSizePixel=1
+    tb.Position=UDim2.new((i-1)*TAB_W,1,0,0)
+    tb.Size=UDim2.new(TAB_W,-2,1,0)
+    tb.Font=Enum.Font.SourceSansBold; tb.Text=name
+    tb.TextColor3=C.textMain; tb.TextSize=FSZ_TAB
+    tb.TextTruncate=Enum.TextTruncate.AtEnd; tb.ZIndex=7
+    tabBtns[name]=tb
+
+    local pg=Instance.new("ScrollingFrame",Win)
+    pg.Name=name.."Page"
+    pg.BackgroundColor3=C.panel
+    pg.BorderColor3=C.border; pg.BorderSizePixel=1
+    pg.Position=UDim2.new(0,4,0,CONTENT_Y)
+    pg.Size=UDim2.new(1,-8,0,CONTENT_H)
+    pg.CanvasSize=UDim2.new(0,0,0,800)
+    pg.ScrollBarThickness=IS_MOBILE and 6 or 4
+    pg.ScrollBarImageColor3=C.sliderFill
+    pg.ScrollingDirection=Enum.ScrollingDirection.Y
+    pg.Visible=(i==1); pg.ZIndex=6
+    tabPages[name]=pg
+
+    tb.MouseButton1Click:Connect(function()
+        for n,p in pairs(tabPages) do p.Visible=(n==name) end
+        for n,b in pairs(tabBtns) do
+            b.BackgroundColor3=(n==name) and C.tabActive or C.tabInactive
+        end
+    end)
+end
+
+-- ─────────────────────────────────────────────
+--  WIDGET FACTORY
+-- ─────────────────────────────────────────────
+
+-- Group box — w param optional (defaults to full width)
+local function GroupBox(parent, title, w, h, x, y)
+    local f=Instance.new("Frame",parent)
+    f.BackgroundColor3=C.groupBg
+    f.BorderColor3=C.border; f.BorderSizePixel=1
+    f.Position=UDim2.new(0,x,0,y)
+    f.Size=UDim2.new(0,w,0,h); f.ZIndex=7
+
+    local lbl=Instance.new("TextLabel",f)
+    lbl.BackgroundTransparency=1
+    lbl.Position=UDim2.new(0,10,0,4)
+    lbl.Size=UDim2.new(1,-14,0,20)
+    lbl.Font=Enum.Font.SourceSansBold; lbl.Text=title
+    lbl.TextColor3=C.textHeader; lbl.TextSize=FSZ_LG
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=8
+    return f
+end
+
+-- Checkbox with large touch hitbox
+local function Checkbox(parent, label, configKey, y)
+    local hit=Instance.new("TextButton",parent)
+    hit.BackgroundTransparency=1; hit.BorderSizePixel=0
+    hit.Position=UDim2.new(0,0,0,y-4)
+    hit.Size=UDim2.new(1,0,0,TAP_H); hit.Text=""; hit.ZIndex=10
+
+    local box=Instance.new("Frame",parent)
+    box.BackgroundColor3=Config[configKey] and C.checkOn or C.checkOff
+    box.BorderColor3=C.border; box.BorderSizePixel=1
+    box.Position=UDim2.new(0,10,0,y+(TAP_H-CHECK_SZ)/2-4)
+    box.Size=UDim2.new(0,CHECK_SZ,0,CHECK_SZ); box.ZIndex=9
+
+    local tick=Instance.new("TextLabel",box)
+    tick.BackgroundTransparency=1; tick.Size=UDim2.new(1,0,1,0)
+    tick.Font=Enum.Font.SourceSansBold
+    tick.Text=Config[configKey] and "✓" or ""
+    tick.TextColor3=Color3.new(1,1,1); tick.TextSize=CHECK_SZ-4; tick.ZIndex=10
+
+    local lbl=Instance.new("TextLabel",parent)
+    lbl.BackgroundTransparency=1
+    lbl.Position=UDim2.new(0,CHECK_SZ+16,0,y-2)
+    lbl.Size=UDim2.new(1,-(CHECK_SZ+20),0,TAP_H)
+    lbl.Font=Enum.Font.SourceSans; lbl.Text=label
+    lbl.TextColor3=C.textMain; lbl.TextSize=FSZ_LG
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=9
+
+    hit.MouseButton1Click:Connect(function()
+        Config[configKey]=not Config[configKey]
+        box.BackgroundColor3=Config[configKey] and C.checkOn or C.checkOff
+        tick.Text=Config[configKey] and "✓" or ""
+    end)
+end
+
+-- Slider — global touch drag, finger can leave track
+local function Slider(parent, label, configKey, minV, maxV, y)
+    local TRACK_W = parent.Size.X.Offset - 20
+    if TRACK_W <= 0 then TRACK_W = COL_W - 20 end
+    local TRACK_H = IS_MOBILE and 22 or 14
+
+    local lbl=Instance.new("TextLabel",parent)
+    lbl.BackgroundTransparency=1
+    lbl.Position=UDim2.new(0,10,0,y)
+    lbl.Size=UDim2.new(0,TRACK_W,0,18)
+    lbl.Font=Enum.Font.SourceSans
+    lbl.Text=label..": "..tostring(Config[configKey])
+    lbl.TextColor3=C.textMain; lbl.TextSize=FSZ_SM
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=9
+
+    local track=Instance.new("Frame",parent)
+    track.BackgroundColor3=C.sliderBg
+    track.BorderColor3=C.border; track.BorderSizePixel=1
+    track.Position=UDim2.new(0,10,0,y+20)
+    track.Size=UDim2.new(0,TRACK_W,0,TRACK_H); track.ZIndex=9
+
+    local fill=Instance.new("Frame",track)
+    fill.BackgroundColor3=C.sliderFill; fill.BorderSizePixel=0
+    fill.Size=UDim2.new((Config[configKey]-minV)/(maxV-minV),0,1,0); fill.ZIndex=10
+
+    -- value label centered on slider  (matches screenshot "1000/1000" style)
+    local valLbl=Instance.new("TextLabel",track)
+    valLbl.BackgroundTransparency=1; valLbl.Size=UDim2.new(1,0,1,0)
+    valLbl.Font=Enum.Font.SourceSansBold
+    valLbl.Text=tostring(Config[configKey]).."/"..tostring(maxV)
+    valLbl.TextColor3=Color3.new(1,1,1); valLbl.TextSize=FSZ_SM; valLbl.ZIndex=11
+
+    local thumb=Instance.new("Frame",track)
+    thumb.BackgroundColor3=Color3.new(1,1,1); thumb.BorderSizePixel=0
+    thumb.AnchorPoint=Vector2.new(0.5,0.5)
+    thumb.Size=UDim2.new(0,IS_MOBILE and 18 or 10,0,IS_MOBILE and 18 or 10)
+    thumb.Position=UDim2.new((Config[configKey]-minV)/(maxV-minV),0,0.5,0)
+    thumb.ZIndex=12
+    local tc=Instance.new("UICorner",thumb); tc.CornerRadius=UDim.new(1,0)
+
+    local sliding=false
+    local function applyX(sx)
+        local rel=math.clamp((sx-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)
+        local val=math.floor(rel*(maxV-minV)+minV+0.5)
+        Config[configKey]=val
+        fill.Size=UDim2.new(rel,0,1,0)
+        thumb.Position=UDim2.new(rel,0,0.5,0)
+        lbl.Text=label..": "..tostring(val)
+        valLbl.Text=tostring(val).."/"..tostring(maxV)
+    end
+
+    track.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+            sliding=true; applyX(i.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if not sliding then return end
+        if i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch then applyX(i.Position.X) end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then sliding=false end
+    end)
+end
+
+-- Dropdown  — touch-friendly, opens a list below
+local openDropdown = nil   -- track which is open so others auto-close
+
+local function Dropdown(parent, label, configKey, options, y)
+    local DROP_H = TAP_H
+    local ITEM_H = TAP_H
+
+    -- label above
+    local hdr=Instance.new("TextLabel",parent)
+    hdr.BackgroundTransparency=1
+    hdr.Position=UDim2.new(0,10,0,y)
+    hdr.Size=UDim2.new(1,-14,0,18)
+    hdr.Font=Enum.Font.SourceSansBold; hdr.Text=label
+    hdr.TextColor3=C.textHeader; hdr.TextSize=FSZ_LG
+    hdr.TextXAlignment=Enum.TextXAlignment.Left; hdr.ZIndex=9
+
+    -- selected value bar
+    local bar=Instance.new("TextButton",parent)
+    bar.BackgroundColor3=C.dropBg
+    bar.BorderColor3=C.border; bar.BorderSizePixel=1
+    bar.Position=UDim2.new(0,10,0,y+22)
+    bar.Size=UDim2.new(1,-20,0,DROP_H)
+    bar.Font=Enum.Font.SourceSans
+    bar.Text="  "..Config[configKey]
+    bar.TextColor3=C.textMain; bar.TextSize=FSZ_LG
+    bar.TextXAlignment=Enum.TextXAlignment.Left; bar.ZIndex=9
+
+    -- arrow indicator
+    local arrow=Instance.new("TextLabel",bar)
+    arrow.BackgroundTransparency=1
+    arrow.Position=UDim2.new(1,-28,0,0)
+    arrow.Size=UDim2.new(0,24,1,0)
+    arrow.Font=Enum.Font.SourceSansBold; arrow.Text="▼"
+    arrow.TextColor3=C.textMain; arrow.TextSize=FSZ_SM; arrow.ZIndex=10
+
+    -- dropdown list frame (hidden by default)
+    local listFrame=Instance.new("Frame",parent)
+    listFrame.BackgroundColor3=C.dropBg
+    listFrame.BorderColor3=C.border; listFrame.BorderSizePixel=1
+    listFrame.Position=UDim2.new(0,10,0,y+22+DROP_H)
+    listFrame.Size=UDim2.new(1,-20,0,#options*ITEM_H)
+    listFrame.Visible=false; listFrame.ZIndex=50   -- high Z so it floats over content
+
+    for idx,opt in ipairs(options) do
+        local item=Instance.new("TextButton",listFrame)
+        item.BackgroundColor3=C.dropBg
+        item.BorderColor3=C.border; item.BorderSizePixel=1
+        item.Position=UDim2.new(0,0,0,(idx-1)*ITEM_H)
+        item.Size=UDim2.new(1,0,0,ITEM_H)
+        item.Font=Enum.Font.SourceSans
+        item.Text="  "..opt
+        item.TextColor3=C.textMain; item.TextSize=FSZ_LG
+        item.TextXAlignment=Enum.TextXAlignment.Left; item.ZIndex=51
+
+        item.MouseButton1Click:Connect(function()
+            Config[configKey]=opt
+            bar.Text="  "..opt
+            listFrame.Visible=false
+            arrow.Text="▼"
+            openDropdown=nil
+        end)
+    end
+
+    bar.MouseButton1Click:Connect(function()
+        if openDropdown and openDropdown~=listFrame then
+            openDropdown.Visible=false
+        end
+        listFrame.Visible=not listFrame.Visible
+        arrow.Text=listFrame.Visible and "▲" or "▼"
+        openDropdown=listFrame.Visible and listFrame or nil
+    end)
+
+    return y + 22 + DROP_H + 8   -- returns next y position
+end
+
+-- ─────────────────────────────────────────────
+--  ROW SPACING
+-- ─────────────────────────────────────────────
+local function cbY(i) return 26+(i-1)*(TAP_H+4) end
+
+-- ─────────────────────────────────────────────
+--  MAIN TAB
+-- ─────────────────────────────────────────────
+local mp=tabPages["Main"]
+local rH=26+3*(TAP_H+4)+2*(TAP_H+28)+8
+local rageG=GroupBox(mp,"Ragebot",GBW_FULL,rH,8,8)
+Checkbox(rageG,"Enable",       "RagebotEnabled",cbY(1))
+Checkbox(rageG,"Orbit",        "Orbit",          cbY(2))
+Checkbox(rageG,"Desync (Beta)","Desync",         cbY(3))
+local sB=cbY(3)+TAP_H+6
+Slider(rageG,"Attack","AttackTick",1,10,sB)
+Slider(rageG,"Hide",  "HideTick",  1,10,sB+TAP_H+28)
+
+local wH=26+TAP_H+8
+GroupBox(mp,"Wallbang",GBW_FULL,wH,8,rH+12)
+-- reuse GroupBox reference
+local wallG=mp:FindFirstChild("MainWindowPage") -- find by walking
+-- simpler: just place checkbox manually
+do
+    local wG=GroupBox(mp,"Wallbang",wH,8,rH+12+wH+4)
+    -- actually let's do it properly inline:
+end
+-- clean approach: store ref
+local wallBox=Instance.new("Frame",mp)
+wallBox.BackgroundColor3=C.groupBg; wallBox.BorderColor3=C.border
+wallBox.BorderSizePixel=1
+wallBox.Position=UDim2.new(0,8,0,rH+12)
+wallBox.Size=UDim2.new(0,GBW_FULL,0,wH); wallBox.ZIndex=7
+local wHdr=Instance.new("TextLabel",wallBox)
+wHdr.BackgroundTransparency=1; wHdr.Position=UDim2.new(0,10,0,4)
+wHdr.Size=UDim2.new(1,-14,0,20); wHdr.Font=Enum.Font.SourceSansBold
+wHdr.Text="Wallbang"; wHdr.TextColor3=C.textHeader
+wHdr.TextSize=FSZ_LG; wHdr.TextXAlignment=Enum.TextXAlignment.Left; wHdr.ZIndex=8
+Checkbox(wallBox,"Enable","Wallbang",cbY(1))
+
+-- ─────────────────────────────────────────────
+--  ESP TAB
+-- ─────────────────────────────────────────────
+local ep=tabPages["ESP"]
+local eH=26+5*(TAP_H+4)+8
+local eG=GroupBox(ep,"ESP Options",GBW_FULL,eH,8,8)
+Checkbox(eG,"Enable ESP",  "ESPEnabled",cbY(1))
+Checkbox(eG,"Boxes",       "ESPBoxes",  cbY(2))
+Checkbox(eG,"Names",       "ESPNames",  cbY(3))
+Checkbox(eG,"Health Bars", "ESPHealth", cbY(4))
+Checkbox(eG,"Tracers",     "ESPTracers",cbY(5))
+
+-- ─────────────────────────────────────────────
+--  VISUAL TAB
+-- ─────────────────────────────────────────────
+local vp=tabPages["Visual"]
+local vH=26+3*(TAP_H+4)+8
+local vG=GroupBox(vp,"Visuals",GBW_FULL,vH,8,8)
+Checkbox(vG,"No Recoil",  "NoRecoil",  cbY(1))
+Checkbox(vG,"No Spread",  "NoSpread",  cbY(2))
+Checkbox(vG,"Full Bright","FullBright",cbY(3))
+
+-- ─────────────────────────────────────────────
+--  CHARACTER TAB
+-- ─────────────────────────────────────────────
+local cp=tabPages["Character"]
+local cH=26+3*(TAP_H+4)+2*(TAP_H+28)+8
+local cG=GroupBox(cp,"Movement",GBW_FULL,cH,8,8)
+Checkbox(cG,"Fly",          "Fly",         cbY(1))
+Slider(cG,"Fly Speed","FlySpeed",10,200,   cbY(1)+TAP_H+4)
+local cBase=cbY(1)+TAP_H+4+TAP_H+28
+Checkbox(cG,"Noclip",       "Noclip",      cBase)
+Checkbox(cG,"Infinite Jump","InfiniteJump",cBase+TAP_H+4)
+Checkbox(cG,"Speed Hack",   "SpeedHack",   cBase+(TAP_H+4)*2)
+Slider(cG,"Walk Speed","WalkSpeed",16,200, cBase+(TAP_H+4)*3)
+
+-- ─────────────────────────────────────────────
+--  MISC TAB  — two-column layout matching screenshot
+-- ─────────────────────────────────────────────
+local msp=tabPages["Misc"]
+
+-- LEFT COLUMN  ────────────────────────────────
+-- Secondary Weapon dropdown
+local secOpts={"Revolver","Pistol","Shotgun","SMG","Sniper","Deagle","None"}
+local fistOpts={"Fists","Sword","Knife","Bat","Katana"}
+local grenOpts={"Grenade","Flashbang","Smoke","Molotov","None"}
+
+-- calc heights
+local DROP_ROW_H = 22+TAP_H+12   -- label(22) + bar(TAP_H) + gap(12)
+local leftColH   = 26 + DROP_ROW_H*3 + 8
+                   + 26 + 4*(TAP_H+4) + 8   -- gun mode group
+
+local leftCol=Instance.new("Frame",msp)
+leftCol.BackgroundTransparency=1
+leftCol.Position=UDim2.new(0,6,0,6)
+leftCol.Size=UDim2.new(0,COL_W,0,800)
+leftCol.ZIndex=6
+
+-- Weapon Selectors group
+local WSGRP_H=26+DROP_ROW_H*3+8
+local wsG=Instance.new("Frame",leftCol)
+wsG.BackgroundColor3=C.groupBg; wsG.BorderColor3=C.border
+wsG.BorderSizePixel=1; wsG.Position=UDim2.new(0,0,0,0)
+wsG.Size=UDim2.new(1,0,0,WSGRP_H); wsG.ZIndex=7
+local wsHdr=Instance.new("TextLabel",wsG)
+wsHdr.BackgroundTransparency=1; wsHdr.Position=UDim2.new(0,10,0,4)
+wsHdr.Size=UDim2.new(1,-14,0,20); wsHdr.Font=Enum.Font.SourceSansBold
+wsHdr.Text="Weapon Selectors"; wsHdr.TextColor3=C.textHeader
+wsHdr.TextSize=FSZ_LG; wsHdr.TextXAlignment=Enum.TextXAlignment.Left; wsHdr.ZIndex=8
+
+local nextY=26
+nextY=Dropdown(wsG,"Secondary Weapon","SecondaryWeapon",secOpts, nextY)
+nextY=Dropdown(wsG,"Fist Weapon",     "FistWeapon",     fistOpts,nextY)
+nextY=Dropdown(wsG,"Grenade Weapon",  "GrenadeWeapon",  grenOpts,nextY)
+
+-- Gun Mode group  (below weapon selectors)
+local GMGRP_H=26+4*(TAP_H+4)+8
+local gmG=Instance.new("Frame",leftCol)
+gmG.BackgroundColor3=C.groupBg; gmG.BorderColor3=C.border
+gmG.BorderSizePixel=1; gmG.Position=UDim2.new(0,0,0,WSGRP_H+8)
+gmG.Size=UDim2.new(1,0,0,GMGRP_H); gmG.ZIndex=7
+local gmHdr=Instance.new("TextLabel",gmG)
+gmHdr.BackgroundTransparency=1; gmHdr.Position=UDim2.new(0,10,0,4)
+gmHdr.Size=UDim2.new(1,-14,0,20); gmHdr.Font=Enum.Font.SourceSansBold
+gmHdr.Text="Gun Mode"; gmHdr.TextColor3=C.textHeader
+gmHdr.TextSize=FSZ_LG; gmHdr.TextXAlignment=Enum.TextXAlignment.Left; gmHdr.ZIndex=8
+
+Checkbox(gmG,"Auto Shoot",  "AutoShoot",  cbY(1))
+Checkbox(gmG,"Rapid Fire",  "RapidFire",  cbY(2))
+Checkbox(gmG,"Rapid Melee", "RapidMelee", cbY(3))
+Checkbox(gmG,"No Recoil",   "NoRecoil",   cbY(4))
+
+-- RIGHT COLUMN  ───────────────────────────────
+local rightCol=Instance.new("Frame",msp)
+rightCol.BackgroundTransparency=1
+rightCol.Position=UDim2.new(0,COL_W+12,0,6)
+rightCol.Size=UDim2.new(0,COL_W,0,800)
+rightCol.ZIndex=6
+
+-- Movement group
+local MVGRP_H=26+2*(TAP_H+4)+(TAP_H+28)+8
+local mvG=Instance.new("Frame",rightCol)
+mvG.BackgroundColor3=C.groupBg; mvG.BorderColor3=C.border
+mvG.BorderSizePixel=1; mvG.Position=UDim2.new(0,0,0,0)
+mvG.Size=UDim2.new(1,0,0,MVGRP_H); mvG.ZIndex=7
+local mvHdr=Instance.new("TextLabel",mvG)
+mvHdr.BackgroundTransparency=1; mvHdr.Position=UDim2.new(0,10,0,4)
+mvHdr.Size=UDim2.new(1,-14,0,20); mvHdr.Font=Enum.Font.SourceSansBold
+mvHdr.Text="Movement"; mvHdr.TextColor3=C.textHeader
+mvHdr.TextSize=FSZ_LG; mvHdr.TextXAlignment=Enum.TextXAlignment.Left; mvHdr.ZIndex=8
+
+Checkbox(mvG,"Fly",          "Fly",         cbY(1))
+Slider(mvG,"Fly Speed","FlySpeed",10,1000,  cbY(1)+TAP_H+4)
+local mvBase=cbY(1)+TAP_H+4+TAP_H+28
+Checkbox(mvG,"Noclip",       "Noclip",      mvBase)
+Checkbox(mvG,"Infinite Jump","InfiniteJump",mvBase+TAP_H+4)
+
+-- Auto Vote group
+local mapOpts={"Chess","Dusty Dunes","Mansion","Nuke","Mirage","Sewer","Cargo"}
+local AVGRP_H=26+TAP_H+4+DROP_ROW_H+8
+local avG=Instance.new("Frame",rightCol)
+avG.BackgroundColor3=C.groupBg; avG.BorderColor3=C.border
+avG.BorderSizePixel=1; avG.Position=UDim2.new(0,0,0,MVGRP_H+8)
+avG.Size=UDim2.new(1,0,0,AVGRP_H); avG.ZIndex=7
+local avHdr=Instance.new("TextLabel",avG)
+avHdr.BackgroundTransparency=1; avHdr.Position=UDim2.new(0,10,0,4)
+avHdr.Size=UDim2.new(1,-14,0,20); avHdr.Font=Enum.Font.SourceSansBold
+avHdr.Text="Auto Vote"; avHdr.TextColor3=C.textHeader
+avHdr.TextSize=FSZ_LG; avHdr.TextXAlignment=Enum.TextXAlignment.Left; avHdr.ZIndex=8
+
+Checkbox(avG,"Enable","AutoVote",cbY(1))
+Dropdown(avG,"Vote Map","VoteMap",mapOpts,cbY(1)+TAP_H+4)
+
+-- ─────────────────────────────────────────────
+--  UI SETTINGS TAB
+-- ─────────────────────────────────────────────
+local uip=tabPages["UI Settings"]
+local uiH=26+2*(TAP_H+4)+8
+local uiG=GroupBox(uip,"Interface",GBW_FULL,uiH,8,8)
+Checkbox(uiG,"Lock UI Position","UILocked",cbY(1))
+Checkbox(uiG,"Hide on Spawn",   "UIHidden", cbY(2))
+
+-- ─────────────────────────────────────────────
+--  SIDEBAR LOGIC
+-- ─────────────────────────────────────────────
+ToggleBtn.MouseButton1Click:Connect(function()
+    Config.UIHidden=not Config.UIHidden
+    Win.Visible=not Config.UIHidden
+    ToggleBtn.Text=Config.UIHidden and "Open UI" or "Toggle UI"
+end)
+UnlockBtn.MouseButton1Click:Connect(function()
+    Config.UILocked=not Config.UILocked
+    UnlockBtn.Text=Config.UILocked and "Lock UI" or "Unlock UI"
+end)
+
+-- ─────────────────────────────────────────────
+--  CORE LOGIC
+-- ─────────────────────────────────────────────
+
+-- Desync (fixed — Y=0, persistent offset, 120ms refresh)
+local desyncOffset=Vector3.new(0,0,0)
+local desyncClock=0
+RunService.Heartbeat:Connect(function(dt)
+    local char=LocalPlayer.Character; if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart"); if not root then return end
+    if Config.Desync then
+        desyncClock=desyncClock+dt
+        if desyncClock>=0.12 then
+            desyncOffset=Vector3.new(math.random(-10,10),0,math.random(-10,10))
+            desyncClock=0
+        end
+        pcall(function() root.CFrame=root.CFrame+desyncOffset end)
+    else
+        desyncOffset=Vector3.new(0,0,0); desyncClock=0
+    end
+end)
+
+-- RenderStepped: weapons + movement
+RunService.RenderStepped:Connect(function()
+    local char=LocalPlayer.Character; if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart")
+    local hum=char:FindFirstChildOfClass("Humanoid")
+
+    -- weapon patches
+    if Config.RapidFire or Config.RapidMelee or Config.NoRecoil or Config.NoSpread then
+        pcall(function()
+            for _,tool in ipairs(char:GetChildren()) do
+                if tool:IsA("Tool") then
+                    for _,v in ipairs(tool:GetDescendants()) do
+                        if v:IsA("NumberValue") or v:IsA("IntValue") then
+                            local n=v.Name:lower()
+                            if Config.RapidFire   and (n:find("cooldown") or n:find("rate") or n:find("firerate")) then v.Value=0.01 end
+                            if Config.RapidMelee  and (n:find("cooldown") or n:find("delay") or n:find("speed"))   then v.Value=0.01 end
+                            if Config.NoRecoil    and (n:find("recoil")   or n:find("kick"))                       then v.Value=0    end
+                            if Config.NoSpread    and (n:find("spread")   or n:find("accuracy") or n:find("inaccuracy")) then v.Value=0 end
+                        end
                     end
                 end
             end
-        end
+        end)
+    end
 
-        if target then
-            local offset = Vector3.new(Config.OrbitOffsetX, Config.OrbitOffsetY, Config.OrbitOffsetZ)
-            rootPart.CFrame = CFrame.new(target.Position + offset, target.Position)
-            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    -- fly
+    if Config.Fly and hum and root then
+        hum.PlatformStand=true
+        local md=hum.MoveDirection
+        root.AssemblyLinearVelocity=Vector3.new(md.X*Config.FlySpeed,0,md.Z*Config.FlySpeed)
+    elseif hum and hum.PlatformStand and not Config.Fly then
+        hum.PlatformStand=false
+    end
+
+    -- speed
+    if Config.SpeedHack and hum then hum.WalkSpeed=Config.WalkSpeed end
+
+    -- noclip
+    if Config.Noclip then
+        for _,p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide=false end
         end
     end
 
-    -- Noclip
-    if Config.Noclip then
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
+    -- fullbright
+    if Config.FullBright then
+        pcall(function()
+            local L=game:GetService("Lighting")
+            L.Brightness=2; L.ClockTime=14
+            L.FogEnd=100000; L.GlobalShadows=false
+            L.Ambient=Color3.new(1,1,1)
+        end)
     end
 end)
 
 -- Infinite Jump
 UserInputService.JumpRequest:Connect(function()
-    if Config.InfiniteJump then
-        local char = LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+    if not Config.InfiniteJump then return end
+    local char=LocalPlayer.Character
+    if char then
+        local h=char:FindFirstChildOfClass("Humanoid")
+        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+-- ESP
+RunService.RenderStepped:Connect(function()
+    for _,v in ipairs(CoreGui:GetChildren()) do
+        if v.Name=="DX_ESP" then v:Destroy() end
+    end
+    if not Config.ESPEnabled then return end
+    local cam=workspace.CurrentCamera
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr~=LocalPlayer and plr.Character then
+            local r=plr.Character:FindFirstChild("HumanoidRootPart")
+            if r then
+                local _,onScreen=cam:WorldToViewportPoint(r.Position)
+                if onScreen then
+                    local tag=Instance.new("BillboardGui",CoreGui)
+                    tag.Name="DX_ESP"; tag.Adornee=r
+                    tag.Size=UDim2.new(0,100,0,24)
+                    tag.StudsOffset=Vector3.new(0,3.5,0)
+                    tag.AlwaysOnTop=true
+                    if Config.ESPNames then
+                        local nl=Instance.new("TextLabel",tag)
+                        nl.BackgroundTransparency=1
+                        nl.Size=UDim2.new(1,0,1,0)
+                        nl.Text=plr.Name
+                        nl.TextColor3=Color3.fromRGB(255,80,80)
+                        nl.TextSize=IS_MOBILE and 16 or 13
+                        nl.Font=Enum.Font.SourceSansBold
+                    end
+                end
             end
         end
     end
 end)
 
-print("[DiamondX v1] Mobile script successfully executed!")
+-- ─────────────────────────────────────────────
+print(string.format("[DiamondX V2.0] Mobile=%s  %dx%d  COL_W=%d",
+    tostring(IS_MOBILE),WIN_W,WIN_H,COL_W))
